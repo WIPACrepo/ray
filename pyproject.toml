@@ -1,0 +1,10 @@
+# pyproject.toml
+
+[project]
+dependencies = []  # leave empty if there are no dependencies
+
+# optional sections:
+
+# [project.optional-dependencies]
+# foo = []
+# bar = []
