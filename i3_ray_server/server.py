@@ -60,6 +60,22 @@ _TRT_PROVIDER_OPTIONS: dict[str, Any] = {
     "trt_profile_opt_shapes": "Input-Branch1:100x10x60x16",
 }
 
+# Map from V2 datatype strings to numpy dtypes — mirrors the client's _V2_DTYPE_TO_NUMPY.
+_V2_DTYPE_TO_NUMPY: dict[str, Any] = {
+    "FP16": np.float16,
+    "FP32": np.float32,
+    "FP64": np.float64,
+    "INT8": np.int8,
+    "INT16": np.int16,
+    "INT32": np.int32,
+    "INT64": np.int64,
+    "UINT8": np.uint8,
+    "UINT16": np.uint16,
+    "UINT32": np.uint32,
+    "UINT64": np.uint64,
+    "BOOL": np.bool_,
+}
+
 # V2 metadata response — static, matches model inputs/outputs.
 _MODEL_METADATA: dict[str, Any] = {
     "name": MODEL_NAME,
@@ -183,9 +199,8 @@ class TglauchClassifier:
             )
 
         tensor = inputs[0]
-        input_array = np.array(tensor["data"], dtype=np.float16).reshape(
-            tensor["shape"]
-        )
+        dtype = _V2_DTYPE_TO_NUMPY.get(tensor.get("datatype", "FP16"), np.float16)
+        input_array = np.array(tensor["data"], dtype=dtype).reshape(tensor["shape"])
 
         result = await self._run_inference(input_array)
 
@@ -218,7 +233,7 @@ class TglauchClassifier:
 
         # session.run is synchronous and GPU-bound; offload it to a thread
         # executor so the Ray Serve event loop is not blocked during inference.
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         outputs = await loop.run_in_executor(
             None,
             lambda: self._session.run(
