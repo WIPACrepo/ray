@@ -1,4 +1,4 @@
-FROM python:3.14
+FROM python:3.13
 
 RUN useradd -m -U app
 WORKDIR /home/app
@@ -18,4 +18,4 @@ RUN --mount=type=bind,source=.,target=/home/app/src,rw \
 USER app
 
 ENV PYTHONPATH=/home/app
-CMD ["python", "-m", "ray"]
+CMD ["python", "-m", "i3_ray_server"]

@@ -58,7 +58,7 @@ jobs:
       - uses: WIPACrepo/wipac-dev-py-setup-action@v5.12
         with:
           mode: PACKAGING
-          python_min: 3.14
+          python_min: 3.13
           auto_mypy_option: True
 
   py-dependencies:
