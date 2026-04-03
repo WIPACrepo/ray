@@ -17,11 +17,12 @@ import argparse
 import asyncio
 import os
 import signal
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import onnxruntime as ort
 import ray
+from ray.serve.deployment import Application
 from fastapi import FastAPI, HTTPException, Request
 from ray import serve
 
@@ -232,7 +233,7 @@ class TglauchClassifier:
         # np.split with an empty index list (single request case) correctly
         # returns [batched_result] unchanged.
         sizes = [arr.shape[0] for arr in input_arrays]
-        return list(np.split(batched_result, np.cumsum(sizes)[:-1]))
+        return list(np.split(batched_result, np.cumsum(sizes)[:-1].tolist()))
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +264,7 @@ if __name__ == "__main__":
     args = _parse_args()
     ray.init()
     serve.start(http_options={"host": args.host, "port": args.port})
-    serve.run(TglauchClassifier.bind())
+    serve.run(cast(Application, TglauchClassifier.bind()))
     # Block until SIGINT/SIGTERM. serve.run_until_interrupted() does not exist
     # in current Ray releases; signal.pause() is the portable equivalent.
     signal.pause()
