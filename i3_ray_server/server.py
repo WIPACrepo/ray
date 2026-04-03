@@ -14,13 +14,15 @@ Triton config.pbtxt equivalents:
 """
 
 import argparse
+import asyncio
 import os
+import signal
 from typing import Any
 
 import numpy as np
 import onnxruntime as ort
 import ray
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from ray import serve
 
 # ---------------------------------------------------------------------------
@@ -114,11 +116,18 @@ class TglauchClassifier:
         sess_options.graph_optimization_level = (
             ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
         )
+        # Parallelism is handled by Ray Serve replicas (4 × 1 GPU each),
+        # not by threading within a session. Keeping both thread counts at 1
+        # avoids TRT context thread-safety issues.
+        sess_options.inter_op_num_threads = 1
+        sess_options.intra_op_num_threads = 1
         self._session = ort.InferenceSession(
             MODEL_PATH, sess_options=sess_options, providers=providers
         )
-        # Confirm actual output name at startup so metadata is correct.
+        # Resolve the actual output tensor name from the model at startup
+        # and write it into _MODEL_METADATA so metadata responses are correct.
         self._output_name: str = self._session.get_outputs()[0].name
+        _MODEL_METADATA["outputs"][0]["name"] = self._output_name
 
     # -----------------------------------------------------------------------
     # Health endpoints
@@ -148,10 +157,9 @@ class TglauchClassifier:
     @app.get(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}")
     async def model_metadata(self):
         """Return V2 model metadata including input/output tensor specs."""
-        metadata = dict(_MODEL_METADATA)
-        # Use the actual output name confirmed at init time.
-        metadata["outputs"][0]["name"] = self._output_name
-        return metadata
+        # _MODEL_METADATA is fully populated in __init__ (output name resolved
+        # from the session), so it can be returned directly.
+        return _MODEL_METADATA
 
     # -----------------------------------------------------------------------
     # Inference endpoints
@@ -159,8 +167,9 @@ class TglauchClassifier:
 
     @app.post(f"/v2/models/{MODEL_NAME}/infer")
     @app.post(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}/infer")
-    async def infer(self, request: dict):
+    async def infer(self, http_request: Request):
         """Accept a V2 infer request and return a V2 infer response."""
+        request = await http_request.json()
         request_id = request.get("id", "")
         inputs = request.get("inputs", [])
 
@@ -206,12 +215,22 @@ class TglauchClassifier:
         """
         # Stack individual requests into a single batched array.
         batched = np.concatenate(input_arrays, axis=0)
-        outputs = self._session.run(
-            [self._output_name],
-            {"Input-Branch1": batched},
+
+        # session.run is synchronous and GPU-bound; offload it to a thread
+        # executor so the Ray Serve event loop is not blocked during inference.
+        loop = asyncio.get_event_loop()
+        outputs = await loop.run_in_executor(
+            None,
+            lambda: self._session.run(
+                [self._output_name],
+                {"Input-Branch1": batched},
+            ),
         )
         batched_result = outputs[0]
+
         # Split the batched output back into per-request arrays.
+        # np.split with an empty index list (single request case) correctly
+        # returns [batched_result] unchanged.
         sizes = [arr.shape[0] for arr in input_arrays]
         return list(np.split(batched_result, np.cumsum(sizes)[:-1]))
 
@@ -245,4 +264,6 @@ if __name__ == "__main__":
     ray.init()
     serve.start(http_options={"host": args.host, "port": args.port})
     serve.run(TglauchClassifier.bind())
-    serve.run_until_interrupted()
+    # Block until SIGINT/SIGTERM. serve.run_until_interrupted() does not exist
+    # in current Ray releases; signal.pause() is the portable equivalent.
+    signal.pause()
