@@ -5,9 +5,11 @@
 #       and https://github.com/WIPACrepo/wipac-dev-py-setup-action for details.
 
 [project]
-dependencies = [] # leave empty if there are no dependencies
-
-# optional sections:
+dependencies = [
+    "ray[serve]",
+    "onnxruntime-gpu",
+    "numpy",
+]
 
 # [project.optional-dependencies]
 # foo = []
