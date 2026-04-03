@@ -233,7 +233,9 @@ class TglauchClassifier:
         # returns [batched_result] unchanged.
         sizes = [arr.shape[0] for arr in input_arrays]
         split_indices: list[int] = np.cumsum(sizes)[:-1].tolist()
-        return list(np.split(batched_result, split_indices))  # type: ignore[no-matching-overload]
+        return list(
+            np.split(batched_result, split_indices)  # ty: ignore[no-matching-overload]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +266,7 @@ if __name__ == "__main__":
     args = _parse_args()
     ray.init()
     serve.start(http_options={"host": args.host, "port": args.port})
-    serve.run(TglauchClassifier.bind())  # type: ignore[unresolved-attribute]
+    serve.run(TglauchClassifier.bind())  # ty: ignore[unresolved-attribute]
     # Block until SIGINT/SIGTERM. serve.run_until_interrupted() does not exist
     # in current Ray releases; signal.pause() is the portable equivalent.
     signal.pause()
