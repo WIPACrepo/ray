@@ -267,7 +267,7 @@ if __name__ == "__main__":
     ray.init()
     serve.start(http_options={"host": args.host, "port": args.port})
     # fmt: off
-    serve.run(TglauchClassifier.bind())  # ty: ignore[unresolved-attribute]  # type: ignore[attr-defined]
+    serve.run(TglauchClassifier.bind())  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     # fmt: on
     # Block until SIGINT/SIGTERM. serve.run_until_interrupted() does not exist
     # in current Ray releases; signal.pause() is the portable equivalent.
