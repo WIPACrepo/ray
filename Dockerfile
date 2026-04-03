@@ -18,4 +18,4 @@ RUN --mount=type=bind,source=.,target=/home/app/src,rw \
 USER app
 
 ENV PYTHONPATH=/home/app
-CMD ["python", "-m", "ray"]
+CMD ["python", "-m", "i3_ray_server"]
