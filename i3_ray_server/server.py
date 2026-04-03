@@ -20,7 +20,7 @@ import signal
 from typing import Any
 
 import numpy as np
-import onnxruntime as ort  # type: ignore[unresolved-import]
+import onnxruntime as ort  # type: ignore[unresolved-import,import-untyped]
 import ray
 from fastapi import FastAPI, HTTPException, Request
 from ray import serve
@@ -266,9 +266,9 @@ if __name__ == "__main__":
     args = _parse_args()
     ray.init()
     serve.start(http_options={"host": args.host, "port": args.port})
-    serve.run(
-        TglauchClassifier.bind()  # ty: ignore[unresolved-attribute]  # type: ignore[attr-defined]
-    )
+    # fmt: off
+    serve.run(TglauchClassifier.bind())  # ty: ignore[unresolved-attribute]  # type: ignore[attr-defined]
+    # fmt: on
     # Block until SIGINT/SIGTERM. serve.run_until_interrupted() does not exist
     # in current Ray releases; signal.pause() is the portable equivalent.
     signal.pause()
