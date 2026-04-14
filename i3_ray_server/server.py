@@ -15,6 +15,7 @@ Triton config.pbtxt equivalents:
 
 import argparse
 import asyncio
+import dataclasses as dc
 import os
 import signal
 from typing import Any
@@ -26,6 +27,22 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from ray import serve
 from rest_tools.server.auth import OpenIDAuth
+from wipac_dev_tools import from_environment_as_dataclass
+from wipac_dev_tools.logging_tools import LoggerLevel
+
+
+@dc.dataclass(frozen=True)
+class EnvConfig:
+    """Environment variables."""
+
+    AUTH_AUDIENCE: str
+    AUTH_OPENID_URL: str
+
+    CI: bool = False  # github actions sets this to 'true'
+    LOG_LEVEL: LoggerLevel = "INFO"
+
+
+ENV = from_environment_as_dataclass(EnvConfig)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -107,19 +124,18 @@ _MODEL_METADATA: dict[str, Any] = {
 
 
 class Auth:
+    """
+    A wrapper around OpenIDAuth that validates the Keycloak Bearer token.
 
-    # OpenIDAuth is instantiated once at module load. It fetches Keycloak's
-    # .well-known/openid-configuration and caches public keys for offline JWT
-    # validation. Set AUTH_OPENID_URL + AUTH_AUDIENCE in the environment; leave
-    # them empty (or set CI=true) to skip auth in tests.
+    OpenIDAuth is instantiated once at module load. It fetches Keycloak's
+    .well-known/openid-configuration and caches public keys for offline JWT
+    validation.
+    """
 
-    _AUTH_OPENID_URL = os.getenv("AUTH_OPENID_URL", "")
-    _AUTH_AUDIENCE = os.getenv("AUTH_AUDIENCE", "")
-    _CI = os.getenv("CI", "").lower() == "true"
     _openid_auth: OpenIDAuth | None = (
-        OpenIDAuth(_AUTH_OPENID_URL, audience=_AUTH_AUDIENCE)
-        if _AUTH_OPENID_URL and not _CI
-        else None
+        None
+        if ENV.CI  # no auth checks in CI
+        else OpenIDAuth(ENV.AUTH_OPENID_URL, audience=ENV.AUTH_AUDIENCE)
     )
     _bearer = HTTPBearer(auto_error=False)
 
@@ -135,14 +151,16 @@ class Auth:
         Raises HTTP 403 on missing token, invalid token, or missing 'v2_client' role.
         """
         if Auth._openid_auth is None:
-            # Auth disabled (CI=true or no AUTH_OPENID_URL set).
-            return {}
+            return {}  # Auth disabled
+
         if credentials is None:
             raise HTTPException(status_code=403, detail="missing authorization header")
+
         try:
             claims = Auth._openid_auth.validate(credentials.credentials)
         except Exception as exc:
             raise HTTPException(status_code=403, detail="invalid token") from exc
+
         # Keycloak realm roles live under realm_access.roles.
         roles: list[str] = claims.get("realm_access", {}).get("roles", [])
 
@@ -204,7 +222,7 @@ class TglauchClassifier:
     @app.get("/v2/health/live")
     async def health_live(
         self,
-        # NOTE: no auth because this endpoint is public to k8s liveness probes
+        # NOTE: no auth because this endpoint is public to readiness probes
     ):
         """Liveness probe — server process is running."""
         return {}
@@ -212,7 +230,7 @@ class TglauchClassifier:
     @app.get("/v2/health/ready")
     async def health_ready(
         self,
-        # NOTE: no auth because this endpoint is public to k8s liveness probes
+        # NOTE: no auth because this endpoint is public to readiness probes
     ):
         """Readiness probe — server is ready to accept requests."""
         return {}
