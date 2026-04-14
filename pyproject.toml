@@ -9,6 +9,8 @@ dependencies = [
     'numpy',
     'onnxruntime-gpu',
     'ray[serve]',
+    'wipac-rest-tools',
+    'wipac-dev-tools',
 ]
 
 # [project.optional-dependencies]

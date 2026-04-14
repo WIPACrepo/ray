@@ -22,8 +22,10 @@ from typing import Any
 import numpy as np
 import onnxruntime as ort  # type: ignore[unresolved-import,import-untyped]
 import ray
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from ray import serve
+from rest_tools.server.auth import OpenIDAuth
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -100,6 +102,49 @@ _MODEL_METADATA: dict[str, Any] = {
 }
 
 # ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+# OpenIDAuth is instantiated once at module load. It fetches Keycloak's
+# .well-known/openid-configuration and caches public keys for offline JWT
+# validation. Set AUTH_OPENID_URL + AUTH_AUDIENCE in the environment; leave
+# them empty (or set CI=true) to skip auth in tests.
+_AUTH_OPENID_URL = os.getenv("AUTH_OPENID_URL", "")
+_AUTH_AUDIENCE = os.getenv("AUTH_AUDIENCE", "")
+_CI = os.getenv("CI", "").lower() == "true"
+_openid_auth: OpenIDAuth | None = (
+    OpenIDAuth(_AUTH_OPENID_URL, audience=_AUTH_AUDIENCE)
+    if _AUTH_OPENID_URL and not _CI
+    else None
+)
+_bearer = HTTPBearer(auto_error=False)
+
+
+async def require_auth(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> dict[str, Any]:
+    """FastAPI dependency that validates the Keycloak Bearer token.
+
+    Returns the decoded JWT claims on success.
+    Raises HTTP 403 on missing or invalid token.
+
+    TODO: add role check here, e.g.:
+        roles = claims.get("realm_access", {}).get("roles", [])
+        if "my-role" not in roles:
+            raise HTTPException(status_code=403, detail="insufficient role")
+    """
+    if _openid_auth is None:
+        # Auth disabled (CI=true or no AUTH_OPENID_URL set).
+        return {}
+    if credentials is None:
+        raise HTTPException(status_code=403, detail="missing authorization header")
+    try:
+        return _openid_auth.validate(credentials.credentials)
+    except Exception as exc:
+        raise HTTPException(status_code=403, detail="invalid token") from exc
+
+
+# ---------------------------------------------------------------------------
 # FastAPI app (shared across all replicas via Ray Serve ingress)
 # ---------------------------------------------------------------------------
 
@@ -171,7 +216,7 @@ class TglauchClassifier:
 
     @app.get(f"/v2/models/{MODEL_NAME}")
     @app.get(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}")
-    async def model_metadata(self):
+    async def model_metadata(self, _claims: dict = Depends(require_auth)):
         """Return V2 model metadata including input/output tensor specs."""
         # _MODEL_METADATA is fully populated in __init__ (output name resolved
         # from the session), so it can be returned directly.
@@ -183,7 +228,7 @@ class TglauchClassifier:
 
     @app.post(f"/v2/models/{MODEL_NAME}/infer")
     @app.post(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}/infer")
-    async def infer(self, http_request: Request):
+    async def infer(self, http_request: Request, _claims: dict = Depends(require_auth)):
         """Accept a V2 infer request and return a V2 infer response."""
         request = await http_request.json()
         request_id = request.get("id", "")
