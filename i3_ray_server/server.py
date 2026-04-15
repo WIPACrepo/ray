@@ -161,8 +161,12 @@ class Auth:
         except Exception as exc:
             raise HTTPException(status_code=403, detail="invalid token") from exc
 
-        # Keycloak realm roles live under realm_access.roles.
-        roles: list[str] = claims.get("realm_access", {}).get("roles", [])
+        # Keycloak client roles live under resource_access.<client_id>.roles.
+        roles: list[str] = (
+            claims.get("resource_access", {})
+            .get(ENV.AUTH_AUDIENCE, {})
+            .get("roles", [])
+        )
 
         if Auth._AUTH_ROLE not in roles:
             raise HTTPException(status_code=403, detail="insufficient role")
