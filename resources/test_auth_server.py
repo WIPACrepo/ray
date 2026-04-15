@@ -1,6 +1,7 @@
 """resources/test_auth_server.py — run with: uvicorn resources.test_auth_server:app --port 8000"""
 
 from fastapi import Depends, FastAPI
+
 from i3_ray_server.server import Auth
 
 app = FastAPI(title="Auth Test Harness")
