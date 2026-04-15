@@ -2,8 +2,9 @@ import torch
 from ray import serve
 from fastapi import FastAPI
 from pydantic import BaseModel
-import argparse
-
+import pathlib
+from dataclasses import dataclass
+from wipac_dev_tools import from_environment_as_dataclass
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
 class TranslationItem(BaseModel):
@@ -11,16 +12,32 @@ class TranslationItem(BaseModel):
     to: str
     content: str
 
+@dataclass
+class EnvConfig:
+    MODEL_ID: str = None
+    MODEL_PATH: pathlib.Path = None
+    AUTH_TOKEN: str = None
+    MAX_GENERATE_TOKENS: int = 1000
+
+    def __post_init__(self) -> None:
+        if self.MODEL_ID is not None and self.MODEL_PATH is not None:
+            raise ValueError("Exclusive parameters 'MODEL_ID' and 'MODEL_PATH' defined")
+        if self.MODEL_PATH:
+            if not pathlib.Path.exists(self.MODEL_PATH):
+                raise ValueError(f"Path {self.MODEL_PATH} does not exist")
+
+ENV = from_environment_as_dataclass(EnvConfig)
+
 app = FastAPI()
 
 @serve.deployment()
 @serve.ingress(app)
 class Translator:
-    def __init__(self, auth_token, max_tokens model_id):
-        self.auth_token = auth_token
-        self.max_tokens = max_tokens
-        self.model_id = model_id
-        model_id = "CohereLabs/aya-23-8B"
+    def __init__(self):
+        self.auth_token = ENV.AUTH_TOKEN
+        self.max_tokens = ENV.MAX_GENERATE_TOKENS
+        self.model_id = ENV.MODEL_PATH if ENV.MODEL_PATH != None else ENV.MODEL_ID
+        self.is_local = True if ENV.MODEL_PATH != None else False
 
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -29,15 +46,17 @@ class Translator:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_id,
+            self.model_id,
             quantization_config=quantization_config,
             dtype=torch.bfloat16,
             device_map="auto",
-            token=self.auth_token
+            token=self.auth_token,
+            local_files_only = self.is_local
         )
         self.tokenizer = AutoTokenizer.from_pretrained(
-            model_id,
-            token=self.auth_token
+            self.model_id,
+            token=self.auth_token,
+            local_files_only = self.is_local
         )
 
         self.model.to(self.device)
@@ -61,17 +80,5 @@ class Translator:
 
         return gen_text
 
-parser = argparse.ArgumentParser()
-
-parser.add_argument("--model_id",
-                    type=str,
-                    help="model id from https://huggingface.co/models")
-parser.add_argument("--auth_token",
-                    type=str,
-                    help="auth token for HuggingFace models")
-parser.add_argument("--max_tokens",
-                    type=int,
-                    default=1,
-                    help="max amount of tokens to generatore per request")
 translator_app = Translator.bind()
 

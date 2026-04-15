@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import aiohttp
 import aiofiles
+import re
 
 async def post_request(session: aiohttp.ClientSession, url: str, payload: dict) -> dict:
     """Send a single POST request and return the result."""
@@ -40,8 +41,9 @@ async def chunked_post_requests(
     """
     all_results: list[dict] = []
     chunks = [payloads[i:i + chunk_size] for i in range(0, len(payloads), chunk_size)]
+    timeout = aiohttp.ClientTimeout(total=300)
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         for chunk in chunks:
             chunk_results = await process_chunk(session, url, chunk)
             all_results.extend(chunk_results)
@@ -50,14 +52,14 @@ async def chunked_post_requests(
 
 async def main(args):
     async with aiofiles.open(args.filename) as f:
-        url = "https://raytest.icecube.aq/predict"
+        # "https://raytest.icecube.aq/predict"
+        url = args.url
         payloads = []
 
         token_chunk = []
         async for line in f:
             for word in line.split():
                 token_chunk.append(word)
-                print (len(token_chunk))
                 if len(token_chunk) >= round(args.token_size * 0.9, 0) and "." in word:
                     tokens = " ".join(map(str, token_chunk))
                     token_chunk = []
@@ -68,17 +70,26 @@ async def main(args):
             token_chunk = []
             payloads.append({"fr": args.fr, "to": args.to, "content": tokens})
 
-        print(payloads)
+        #print(f"POST {url}: {payloads}")
         results = await chunked_post_requests(url, payloads, chunk_size=args.chunk_size)
+
+        pattern = r'(<\|START_OF_TURN_TOKEN\|><\|(?:USER|CHATBOT)_TOKEN\|>)([\s\S]*?)(?=<\|START_OF_TURN_TOKEN\|>|$)'
 
         print(f"Total responses: {len(results)}")
         for r in results:
-            print(r)
+            matches = re.findall(pattern, r)
+            for role, content in matches:
+                if "CHATBOT" in role: print(f"{content}")
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("filename")
+    parser.add_argument("--url",
+                        required=True,
+                        type=str)
     parser.add_argument("--fr",
                         type=str,
                         default="English")
