@@ -26,7 +26,7 @@ import ray
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from ray import serve
-from rest_tools.server.auth import OpenIDAuth
+from rest_tools.utils import OpenIDAuth
 from wipac_dev_tools import from_environment_as_dataclass
 from wipac_dev_tools.logging_tools import LoggerLevel
 
@@ -35,8 +35,8 @@ from wipac_dev_tools.logging_tools import LoggerLevel
 class EnvConfig:
     """Environment variables."""
 
-    AUTH_AUDIENCE: str
-    AUTH_OPENID_URL: str
+    AUTH_AUDIENCE: str = "ray-serve"
+    AUTH_OPENID_URL: str = "https://keycloak.icecube.wisc.edu/auth/realms/IceCube"
 
     CI: bool = False  # github actions sets this to 'true'
     LOG_LEVEL: LoggerLevel = "INFO"
