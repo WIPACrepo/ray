@@ -139,7 +139,7 @@ class Auth:
     )
     _bearer = HTTPBearer(auto_error=False)
 
-    _AUTH_ROLE = "v2_client"
+    _AUTH_ROLE = "admin"  # we can update this and/or add more roles later (parametrized by caller)
 
     @staticmethod
     async def require_auth(
