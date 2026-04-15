@@ -15,6 +15,7 @@ Triton config.pbtxt equivalents:
 
 import argparse
 import asyncio
+import dataclasses as dc
 import os
 import signal
 from typing import Any
@@ -22,8 +23,26 @@ from typing import Any
 import numpy as np
 import onnxruntime as ort  # type: ignore[unresolved-import,import-untyped]
 import ray
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from ray import serve
+from rest_tools.utils import OpenIDAuth
+from wipac_dev_tools import from_environment_as_dataclass
+from wipac_dev_tools.logging_tools import LoggerLevel
+
+
+@dc.dataclass(frozen=True)
+class EnvConfig:
+    """Environment variables."""
+
+    AUTH_AUDIENCE: str = "ray-serve"
+    AUTH_OPENID_URL: str = "https://keycloak.icecube.wisc.edu/auth/realms/IceCube"
+
+    CI: bool = False  # github actions sets this to 'true'
+    LOG_LEVEL: LoggerLevel = "INFO"
+
+
+ENV = from_environment_as_dataclass(EnvConfig)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -100,6 +119,61 @@ _MODEL_METADATA: dict[str, Any] = {
 }
 
 # ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+
+class Auth:
+    """
+    A wrapper around OpenIDAuth that validates the Keycloak Bearer token.
+
+    OpenIDAuth is instantiated once at module load. It fetches Keycloak's
+    .well-known/openid-configuration and caches public keys for offline JWT
+    validation.
+    """
+
+    _openid_auth: OpenIDAuth | None = (
+        None
+        if ENV.CI  # no auth checks in CI
+        else OpenIDAuth(ENV.AUTH_OPENID_URL, audience=ENV.AUTH_AUDIENCE)
+    )
+    _bearer = HTTPBearer(auto_error=False)
+
+    _AUTH_ROLE = "admin"  # we can update this and/or add more roles later (parametrized by caller)
+
+    @staticmethod
+    async def require_auth(
+        credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    ) -> dict[str, Any]:
+        """FastAPI dependency that validates the Keycloak Bearer token.
+
+        Returns the decoded JWT claims on success.
+        Raises HTTP 403 on missing token, invalid token, or missing 'v2_client' role.
+        """
+        if Auth._openid_auth is None:
+            return {}  # Auth disabled
+
+        if credentials is None:
+            raise HTTPException(status_code=403, detail="missing authorization header")
+
+        try:
+            claims = Auth._openid_auth.validate(credentials.credentials)
+        except Exception as exc:
+            raise HTTPException(status_code=403, detail="invalid token") from exc
+
+        # Keycloak client roles live under resource_access.<client_id>.roles.
+        roles: list[str] = (
+            claims.get("resource_access", {})
+            .get(ENV.AUTH_AUDIENCE, {})
+            .get("roles", [])
+        )
+
+        if Auth._AUTH_ROLE not in roles:
+            raise HTTPException(status_code=403, detail="insufficient role")
+        return claims
+
+
+# ---------------------------------------------------------------------------
 # FastAPI app (shared across all replicas via Ray Serve ingress)
 # ---------------------------------------------------------------------------
 
@@ -150,18 +224,27 @@ class TglauchClassifier:
     # -----------------------------------------------------------------------
 
     @app.get("/v2/health/live")
-    async def health_live(self):
+    async def health_live(
+        self,
+        # NOTE: no auth because this endpoint is public to readiness probes
+    ):
         """Liveness probe — server process is running."""
         return {}
 
     @app.get("/v2/health/ready")
-    async def health_ready(self):
+    async def health_ready(
+        self,
+        # NOTE: no auth because this endpoint is public to readiness probes
+    ):
         """Readiness probe — server is ready to accept requests."""
         return {}
 
     @app.get(f"/v2/models/{MODEL_NAME}/ready")
     @app.get(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}/ready")
-    async def model_ready(self):
+    async def model_ready(
+        self,
+        _claims: dict = Depends(Auth.require_auth),
+    ):
         """Model readiness probe."""
         return {}
 
@@ -171,7 +254,10 @@ class TglauchClassifier:
 
     @app.get(f"/v2/models/{MODEL_NAME}")
     @app.get(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}")
-    async def model_metadata(self):
+    async def model_metadata(
+        self,
+        _claims: dict = Depends(Auth.require_auth),
+    ):
         """Return V2 model metadata including input/output tensor specs."""
         # _MODEL_METADATA is fully populated in __init__ (output name resolved
         # from the session), so it can be returned directly.
@@ -183,7 +269,11 @@ class TglauchClassifier:
 
     @app.post(f"/v2/models/{MODEL_NAME}/infer")
     @app.post(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}/infer")
-    async def infer(self, http_request: Request):
+    async def infer(
+        self,
+        http_request: Request,
+        _claims: dict = Depends(Auth.require_auth),
+    ):
         """Accept a V2 infer request and return a V2 infer response."""
         request = await http_request.json()
         request_id = request.get("id", "")
