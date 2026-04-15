@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import requests
 import argparse
 import asyncio
 import aiohttp
@@ -79,9 +78,8 @@ async def main(args):
         for r in results:
             matches = re.findall(pattern, r)
             for role, content in matches:
-                if "CHATBOT" in role: print(f"{content}")
-
-
+                if "CHATBOT" in role:
+                    print(f"{content}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

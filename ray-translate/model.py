@@ -36,8 +36,8 @@ class Translator:
     def __init__(self):
         self.auth_token = ENV.AUTH_TOKEN
         self.max_tokens = ENV.MAX_GENERATE_TOKENS
-        self.model_id = ENV.MODEL_PATH if ENV.MODEL_PATH != None else ENV.MODEL_ID
-        self.is_local = True if ENV.MODEL_PATH != None else False
+        self.model_id = ENV.MODEL_PATH if ENV.MODEL_PATH is not None else ENV.MODEL_ID
+        self.is_local = True if ENV.MODEL_PATH is not None else False
 
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
