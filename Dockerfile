@@ -1,8 +1,12 @@
-FROM python:3.13
+FROM rayproject/ray:2.52.0-gpu as stage
+# Set args for Python version
+ARG DEBIAN_FRONTEND=noninteractive
+ARG PYTHON=3.13
+ARG HOSTTYPE=${HOSTTYPE:-x86_64}
+ARG RAY_UID=1000
+ARG RAY_GID=100
 
-RUN useradd -m -U app
-WORKDIR /home/app
-USER app
+FROM stage
 
 # Mount the entire build context (including '.git/') just for this step
 # NOTE:
@@ -15,7 +19,5 @@ USER root
 RUN --mount=type=bind,source=.,target=/home/app/src,rw \
     --mount=type=cache,target=/tmp/pip-cache \
     pip install /home/app/src
-USER app
 
-ENV PYTHONPATH=/home/app
-CMD ["python", "-m", "i3_ray_server"]
+WORKDIR /serve_app
