@@ -375,7 +375,7 @@ if __name__ == "__main__":
     # Assign TglauchClassifier application to variable for ray serve exectution in kubernetes
     # else run directly
     if "KUBERNETES_SERVICE_HOST" in os.environ:
-        model = TglauchClassifier.bind()
+        model = TglauchClassifier.bind()  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     else:
         serve.run(TglauchClassifier.bind())  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         # fmt: on
