@@ -44,7 +44,7 @@ msgpack==1.1.2
 multidict==6.7.1
 networkx==3.6.1
 numpy==2.4.2
-nvidia-cublas-cu12==12.8.4.1
+nvidia-cublas-cu12==12.9.2.10
 nvidia-cuda-cupti-cu12==12.8.90
 nvidia-cuda-nvrtc-cu12==12.8.93
 nvidia-cuda-runtime-cu12==12.8.90
