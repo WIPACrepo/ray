@@ -185,11 +185,7 @@ app = FastAPI()
 # ---------------------------------------------------------------------------
 
 
-@serve.deployment(
-    # Matches config.pbtxt instance_group count=4, kind=KIND_GPU.
-    num_replicas=4,
-    ray_actor_options={"num_gpus": 1},
-)
+@serve.deployment()
 @serve.ingress(app)
 class TglauchClassifier:
     """Ray Serve deployment serving tglauch_classifier via ONNX Runtime + TRT."""
@@ -372,13 +368,13 @@ if __name__ == "__main__":
     ray.init()
     serve.start(http_options={"host": args.host, "port": args.port})
     # fmt: off
-    # Assign TglauchClassifier application to variable for ray serve exectution in kubernetes
-    # else run directly
-    if "KUBERNETES_SERVICE_HOST" in os.environ:
-        model = TglauchClassifier.bind()  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
-    else:
-        serve.run(TglauchClassifier.bind())  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
-        # fmt: on
-        # Block until SIGINT/SIGTERM. serve.run_until_interrupted() does not exist
-        # in current Ray releases; signal.pause() is the portable equivalent.
-        signal.pause()
+    serve.run(TglauchClassifier.bind())  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+    # fmt: on
+    # Block until SIGINT/SIGTERM. serve.run_until_interrupted() does not exist
+    # in current Ray releases; signal.pause() is the portable equivalent.
+    signal.pause()
+
+# Assign TglauchClassifier application to variable for ray serve exectution in kubernetes
+# else run directly
+if "KUBERNETES_SERVICE_HOST" in os.environ:
+    model = TglauchClassifier.bind()  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]

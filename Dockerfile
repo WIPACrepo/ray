@@ -1,4 +1,4 @@
-FROM rayproject/ray:2.52.0-gpu as stage
+FROM rayproject/ray:nightly-py313-gpu as stage
 # Set args for Python version
 ARG DEBIAN_FRONTEND=noninteractive
 ARG PYTHON=3.13
@@ -20,4 +20,4 @@ RUN --mount=type=bind,source=.,target=/home/app/src,rw \
     --mount=type=cache,target=/tmp/pip-cache \
     pip install /home/app/src
 
-WORKDIR /serve_app
+COPY i3_ray_server/* .
