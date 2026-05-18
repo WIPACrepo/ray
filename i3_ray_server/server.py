@@ -66,6 +66,9 @@ BATCH_MAX_SIZE = 250
 BATCH_WAIT_TIMEOUT_S = 0.001
 
 # TensorRT provider options, mirroring config.pbtxt gpu_execution_accelerator.
+# Profile shapes match the actual ONNX model: Input-Branch1 is rank-5
+# (batch, 10, 10, 60, 16), not rank-4. The cached engine under
+# trt_engine_cache_path must be rebuilt after editing these dims.
 _TRT_PROVIDER_OPTIONS: dict[str, Any] = {
     "trt_fp16_enable": True,
     "trt_max_workspace_size": 12_884_901_888,
@@ -74,9 +77,9 @@ _TRT_PROVIDER_OPTIONS: dict[str, Any] = {
     "trt_timing_cache_enable": True,
     "trt_context_memory_sharing_enable": True,
     # Profile shapes match config.pbtxt trt_profile_*_shapes.
-    "trt_profile_min_shapes": "Input-Branch1:1x10x60x16",
-    "trt_profile_max_shapes": "Input-Branch1:250x10x60x16",
-    "trt_profile_opt_shapes": "Input-Branch1:100x10x60x16",
+    "trt_profile_min_shapes": "Input-Branch1:1x10x10x60x16",
+    "trt_profile_max_shapes": "Input-Branch1:250x10x10x60x16",
+    "trt_profile_opt_shapes": "Input-Branch1:100x10x10x60x16",
 }
 
 # Map from V2 datatype strings to numpy dtypes — mirrors the client's _V2_DTYPE_TO_NUMPY.
@@ -95,26 +98,42 @@ _V2_DTYPE_TO_NUMPY: dict[str, Any] = {
     "BOOL": np.bool_,
 }
 
-# V2 metadata response — static, matches model inputs/outputs.
+# Map from ONNX Runtime input/output type strings to V2 datatype strings.
+# ORT sometimes returns "tensor(float)" instead of "tensor(float32)"; both
+# map to "FP32" so either form resolves consistently.
+_ORT_TYPE_TO_V2: dict[str, str] = {
+    "tensor(float16)": "FP16",
+    "tensor(float)": "FP32",
+    "tensor(float32)": "FP32",
+    "tensor(float64)": "FP64",
+    "tensor(double)": "FP64",
+    "tensor(int8)": "INT8",
+    "tensor(int16)": "INT16",
+    "tensor(int32)": "INT32",
+    "tensor(int64)": "INT64",
+    "tensor(uint8)": "UINT8",
+    "tensor(uint16)": "UINT16",
+    "tensor(uint32)": "UINT32",
+    "tensor(uint64)": "UINT64",
+    "tensor(bool)": "BOOL",
+}
+
+
+def _ort_shape_to_v2(shape: list) -> list[int]:
+    """Convert an ORT shape (with str entries for dynamic dims) to a V2 shape (-1 for dynamic)."""
+    # ORT reports symbolic dims as strings (e.g. 'unk__4862'); V2 uses -1.
+    return [-1 if isinstance(s, str) else int(s) for s in shape]
+
+
+# V2 metadata response. Tensor specs (name/shape/datatype) are populated at
+# startup from the ONNX session — see TglauchClassifier.__init__. The values
+# below are placeholders that get overwritten before any request is served.
 _MODEL_METADATA: dict[str, Any] = {
     "name": MODEL_NAME,
     "versions": [MODEL_VERSION],
     "platform": "onnxruntime_onnx",
-    "inputs": [
-        {
-            "name": "Input-Branch1",
-            "datatype": "FP16",
-            # -1 indicates dynamic batch axis.
-            "shape": [-1, 10, 60, 16],
-        }
-    ],
-    "outputs": [
-        {
-            "name": "output",  # TODO: confirm output tensor name from model
-            "datatype": "FP16",
-            "shape": [-1],  # TODO: confirm output shape from model
-        }
-    ],
+    "inputs": [{"name": "", "shape": [], "datatype": ""}],
+    "outputs": [{"name": "", "shape": [], "datatype": ""}],
     "max_batch_size": BATCH_MAX_SIZE,
 }
 
@@ -148,7 +167,7 @@ class Auth:
         """FastAPI dependency that validates the Keycloak Bearer token.
 
         Returns the decoded JWT claims on success.
-        Raises HTTP 403 on missing token, invalid token, or missing 'v2_client' role.
+        Raises HTTP 403 on missing token, invalid token, or missing 'admin' role.
         """
         if Auth._openid_auth is None:
             return {}  # Auth disabled
@@ -210,10 +229,23 @@ class TglauchClassifier:
         self._session = ort.InferenceSession(
             MODEL_PATH, sess_options=sess_options, providers=providers
         )
-        # Resolve the actual output tensor name from the model at startup
-        # and write it into _MODEL_METADATA so metadata responses are correct.
-        self._output_name: str = self._session.get_outputs()[0].name
+
+        # Resolve all tensor metadata from the actual ONNX model at startup so
+        # the V2 metadata endpoint never drifts from what the model accepts /
+        # returns. Without this, hardcoded shapes/dtypes in _MODEL_METADATA can
+        # silently lie about the model (e.g. wrong rank, wrong output dtype).
+        ort_in = self._session.get_inputs()[0]
+        ort_out = self._session.get_outputs()[0]
+        self._input_name: str = ort_in.name
+        self._output_name: str = ort_out.name
+        self._output_datatype: str = _ORT_TYPE_TO_V2[ort_out.type]
+
+        _MODEL_METADATA["inputs"][0]["name"] = self._input_name
+        _MODEL_METADATA["inputs"][0]["shape"] = _ort_shape_to_v2(ort_in.shape)
+        _MODEL_METADATA["inputs"][0]["datatype"] = _ORT_TYPE_TO_V2[ort_in.type]
         _MODEL_METADATA["outputs"][0]["name"] = self._output_name
+        _MODEL_METADATA["outputs"][0]["shape"] = _ort_shape_to_v2(ort_out.shape)
+        _MODEL_METADATA["outputs"][0]["datatype"] = self._output_datatype
 
     # -----------------------------------------------------------------------
     # Health endpoints
@@ -255,8 +287,8 @@ class TglauchClassifier:
         _claims: dict = Depends(Auth.require_auth),
     ):
         """Return V2 model metadata including input/output tensor specs."""
-        # _MODEL_METADATA is fully populated in __init__ (output name resolved
-        # from the session), so it can be returned directly.
+        # _MODEL_METADATA is fully populated in __init__ from the ONNX session,
+        # so it can be returned directly.
         return _MODEL_METADATA
 
     # -----------------------------------------------------------------------
@@ -297,7 +329,9 @@ class TglauchClassifier:
             "outputs": [
                 {
                     "name": self._output_name,
-                    "datatype": "FP16",
+                    # Use the dtype resolved from the model session, not a
+                    # hardcoded string — otherwise the client downcasts.
+                    "datatype": self._output_datatype,
                     "shape": list(result.shape),
                     "data": result.flatten().tolist(),
                 }
@@ -324,7 +358,7 @@ class TglauchClassifier:
             None,
             lambda: self._session.run(
                 [self._output_name],
-                {"Input-Branch1": batched},
+                {self._input_name: batched},
             ),
         )
         batched_result = outputs[0]
