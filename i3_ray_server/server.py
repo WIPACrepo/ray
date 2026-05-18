@@ -435,7 +435,7 @@ class TglauchClassifier:
                 {self._input_name: batched},
             ),
         )
-        batched_result: np.ndarray = outputs[0]
+        batched_result = np.asarray(outputs[0])
         LOGGER.debug(
             f"_run_inference: complete  "
             f"out_shape={batched_result.shape}  "
