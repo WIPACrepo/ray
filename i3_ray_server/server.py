@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import dataclasses as dc
 import importlib.metadata
+import logging
 import os
 import signal
 import time
@@ -45,7 +46,8 @@ class EnvConfig:
 
 
 ENV = from_environment_as_dataclass(EnvConfig)
-LOGGER = LoggerLevel.get_logger(__name__, ENV.LOG_LEVEL)
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(ENV.LOG_LEVEL)
 
 
 def _pkg_version(pkg: str) -> str:
