@@ -16,8 +16,10 @@ Triton config.pbtxt equivalents:
 import argparse
 import asyncio
 import dataclasses as dc
+import importlib.metadata
 import os
 import signal
+import time
 from typing import Any
 
 import numpy as np
@@ -43,6 +45,16 @@ class EnvConfig:
 
 
 ENV = from_environment_as_dataclass(EnvConfig)
+LOGGER = LoggerLevel.get_logger(__name__, ENV.LOG_LEVEL)
+
+
+def _pkg_version(pkg: str) -> str:
+    """Return the installed version of a package, or 'unknown' if not found."""
+    try:
+        return importlib.metadata.version(pkg)
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -173,11 +185,13 @@ class Auth:
             return {}  # Auth disabled
 
         if credentials is None:
+            LOGGER.warning("auth rejected: missing authorization header")
             raise HTTPException(status_code=403, detail="missing authorization header")
 
         try:
             claims = Auth._openid_auth.validate(credentials.credentials)
         except Exception as exc:
+            LOGGER.warning(f"auth rejected: invalid token: {exc}")
             raise HTTPException(status_code=403, detail="invalid token") from exc
 
         # Keycloak client roles live under resource_access.<client_id>.roles.
@@ -188,6 +202,9 @@ class Auth:
         )
 
         if Auth._AUTH_ROLE not in roles:
+            LOGGER.warning(
+                f"auth rejected: missing role {Auth._AUTH_ROLE!r}  present={roles}"
+            )
             raise HTTPException(status_code=403, detail="insufficient role")
         return claims
 
@@ -247,6 +264,31 @@ class TglauchClassifier:
         _MODEL_METADATA["outputs"][0]["shape"] = _ort_shape_to_v2(ort_out.shape)
         _MODEL_METADATA["outputs"][0]["datatype"] = self._output_datatype
 
+        LOGGER.info(
+            f"TglauchClassifier ready  "
+            f"model={MODEL_NAME!r} version={MODEL_VERSION}  "
+            f"auth={'disabled (CI)' if ENV.CI else 'enabled'}"
+        )
+        # Update 'i3-ml-suite' below to match the actual deployed package name.
+        LOGGER.info(
+            f"versions:  "
+            f"server={_pkg_version('i3-ml-suite')}  "
+            f"onnxruntime={_pkg_version('onnxruntime')}  "
+            f"ray={_pkg_version('ray')}"
+        )
+        LOGGER.info(f"model path: {MODEL_PATH}")
+        LOGGER.info(
+            f"ONNX tensors:  "
+            f"input={self._input_name!r} shape={_MODEL_METADATA['inputs'][0]['shape']} "
+            f"dtype={_MODEL_METADATA['inputs'][0]['datatype']}  |  "
+            f"output={self._output_name!r} shape={_MODEL_METADATA['outputs'][0]['shape']} "
+            f"dtype={self._output_datatype}"
+        )
+        LOGGER.info(
+            f"batching:  max_size={BATCH_MAX_SIZE}  "
+            f"wait_timeout={BATCH_WAIT_TIMEOUT_S}s"
+        )
+
     # -----------------------------------------------------------------------
     # Health endpoints
     # -----------------------------------------------------------------------
@@ -257,6 +299,7 @@ class TglauchClassifier:
         # NOTE: no auth because this endpoint is public to readiness probes
     ):
         """Liveness probe — server process is running."""
+        LOGGER.debug("health/live")
         return {}
 
     @app.get("/v2/health/ready")
@@ -265,6 +308,7 @@ class TglauchClassifier:
         # NOTE: no auth because this endpoint is public to readiness probes
     ):
         """Readiness probe — server is ready to accept requests."""
+        LOGGER.debug("health/ready")
         return {}
 
     @app.get(f"/v2/models/{MODEL_NAME}/ready")
@@ -274,6 +318,7 @@ class TglauchClassifier:
         _claims: dict = Depends(Auth.require_auth),
     ):
         """Model readiness probe."""
+        LOGGER.debug(f"model_ready  model={MODEL_NAME!r} version={MODEL_VERSION}")
         return {}
 
     # -----------------------------------------------------------------------
@@ -289,6 +334,7 @@ class TglauchClassifier:
         """Return V2 model metadata including input/output tensor specs."""
         # _MODEL_METADATA is fully populated in __init__ from the ONNX session,
         # so it can be returned directly.
+        LOGGER.debug(f"model_metadata  model={MODEL_NAME!r} version={MODEL_VERSION}")
         return _MODEL_METADATA
 
     # -----------------------------------------------------------------------
@@ -308,19 +354,40 @@ class TglauchClassifier:
         inputs = request.get("inputs", [])
 
         if not inputs:
+            LOGGER.warning(f"infer rejected: no inputs  id={request_id[:8]!r}")
             raise HTTPException(status_code=400, detail="No inputs provided")
         # Currently only supporting single-input models.
         if len(inputs) != 1:
+            LOGGER.warning(
+                f"infer rejected: expected 1 input tensor, got {len(inputs)}  "
+                f"id={request_id[:8]!r}"
+            )
             raise HTTPException(
                 status_code=400,
                 detail=f"Expected 1 input tensor, got {len(inputs)}",
             )
 
         tensor = inputs[0]
+        input_shape = tensor.get("shape", [])
+        LOGGER.debug(f"infer request  id={request_id[:8]!r} shape={input_shape}")
+
         dtype = _V2_DTYPE_TO_NUMPY.get(tensor.get("datatype", "FP16"), np.float16)
         input_array = np.array(tensor["data"], dtype=dtype).reshape(tensor["shape"])
 
-        result = await self._run_inference(input_array)
+        t0 = time.monotonic()
+        try:
+            result = await self._run_inference(input_array)
+        except Exception as exc:
+            LOGGER.error(
+                f"infer failed  id={request_id[:8]!r} shape={input_shape}: {exc}"
+            )
+            raise
+
+        LOGGER.info(
+            f"infer  id={request_id[:8]!r}  "
+            f"in={input_shape}  out={list(result.shape)}  "
+            f"{(time.monotonic() - t0) * 1000:.1f}ms"
+        )
 
         return {
             "id": request_id,
@@ -351,9 +418,14 @@ class TglauchClassifier:
         # Stack individual requests into a single batched array.
         batched = np.concatenate(input_arrays, axis=0)
 
+        LOGGER.debug(
+            f"_run_inference: batching {len(input_arrays)} request(s) → shape {batched.shape}"
+        )
+
         # session.run is synchronous and GPU-bound; offload it to a thread
         # executor so the Ray Serve event loop is not blocked during inference.
         loop = asyncio.get_running_loop()
+        t0 = time.monotonic()
         outputs = await loop.run_in_executor(
             None,
             lambda: self._session.run(
@@ -362,6 +434,11 @@ class TglauchClassifier:
             ),
         )
         batched_result = outputs[0]
+        LOGGER.debug(
+            f"_run_inference: complete  "
+            f"out_shape={batched_result.shape}  "
+            f"{(time.monotonic() - t0) * 1000:.1f}ms"
+        )
 
         # Split the batched output back into per-request arrays.
         # np.split with an empty index list (single request case) correctly
