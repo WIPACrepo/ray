@@ -28,4 +28,4 @@ jobs:
       free_disk_space: true
     secrets:
       registry_username: ${{ secrets.HARBOR_USERNAME }}
-      registry_token: ${{ secrets.HARBOR_TOKEN }}
+      registry_token: ${{ secrets.HARBOR_PASSWORD }}
