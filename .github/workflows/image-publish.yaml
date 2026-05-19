@@ -25,6 +25,7 @@ jobs:
       image_name: i3_ray_serve
       mode: 'BUILD'
       build_platforms_csv: linux/amd64
+      free_disk_space: true
     secrets:
       registry_username: ${{ secrets.HARBOR_USERNAME }}
       registry_token: ${{ secrets.HARBOR_TOKEN }}
