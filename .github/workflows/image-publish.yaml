@@ -26,6 +26,7 @@ jobs:
       mode: 'BUILD'
       build_platforms_csv: linux/amd64
       free_disk_space: true
+      extra_build_tag: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || 'test' }}
     secrets:
       registry_username: ${{ secrets.HARBOR_USERNAME }}
       registry_token: ${{ secrets.HARBOR_PASSWORD }}
