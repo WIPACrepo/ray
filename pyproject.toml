@@ -14,9 +14,9 @@ dependencies = [
     'onnxruntime-gpu',
     'pytorch',
     'ray[serve]',
+    'torch',
     'wipac-dev-tools',
     'wipac-rest-tools',
-    'torch',
 ]
 
 # [project.optional-dependencies]
