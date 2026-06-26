@@ -16,6 +16,7 @@ dependencies = [
     'ray[serve]',
     'wipac-dev-tools',
     'wipac-rest-tools',
+    'torch',
 ]
 
 # [project.optional-dependencies]
