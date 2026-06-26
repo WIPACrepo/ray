@@ -11,7 +11,7 @@ build-backend = "setuptools.build_meta"
 [project]
 dependencies = [
     'numpy',
-    'onnxruntime-gpu',
+    'onnxruntime-gpu[cuda,cudnn]',
     'ray[serve]',
     'torch',
     'wipac-dev-tools',
