@@ -26,6 +26,7 @@ from typing import Any
 import numpy as np
 import onnxruntime as ort  # type: ignore[unresolved-import,import-untyped]
 import ray
+import torch
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from ray import serve

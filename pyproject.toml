@@ -15,6 +15,7 @@ dependencies = [
     'ray[serve]',
     'wipac-dev-tools',
     'wipac-rest-tools',
+    'pytorch',
 ]
 
 # [project.optional-dependencies]
