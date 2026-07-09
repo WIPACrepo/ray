@@ -77,7 +77,7 @@ jobs:
           only_precheck: true
       # 2: pre-check passed, so proceed...
       - if: ${{ steps.pydep-precheck.outputs.do_generation == 'true' }}
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - if: ${{ steps.pydep-precheck.outputs.do_generation == 'true' }}
         uses: docker/build-push-action@v6
         with:
@@ -101,7 +101,7 @@ jobs:
         with:
           ref: ${{ github.sha }}  # lock to triggered commit (github.ref is dynamic)
           fetch-depth: 0  # setuptools-scm needs to access git tags
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v6
         with:
           context: .
