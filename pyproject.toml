@@ -13,6 +13,7 @@ dependencies = [
     'numpy',
     'onnxruntime-gpu[cuda,cudnn]',
     'ray[serve]',
+    'tensorrt',
     'torch',
     'wipac-dev-tools',
     'wipac-rest-tools',
