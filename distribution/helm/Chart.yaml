@@ -1,0 +1,3 @@
+apiVersion: v2
+name: i3-ray-serve
+version: 0.0.1

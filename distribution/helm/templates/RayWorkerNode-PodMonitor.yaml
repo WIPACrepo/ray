@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ Release.Name }}-workers-monitor
+  namespace: {{ .Release.Namespace }}
+spec:
+  jobLabel: ray-workers
+  selector:
+    matchLabels:
+      ray.io/node-type: worker
+  # A list of endpoints allowed as part of this PodMonitor.
+  podMetricsEndpoints:
+  - port: metrics
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_label_ray_io_cluster]
+      targetLabel: ray_io_cluster

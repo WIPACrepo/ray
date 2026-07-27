@@ -1,0 +1,106 @@
+apiVersion: ray.io/v1
+kind: RayService
+metadata:
+  name: {{ .Release.Name }}-serve
+  namespace: {{ .Realse.Namespace }}
+spec:
+  # serveConfigV2 takes a yaml multi-line scalar, which should be a Ray Serve multi-application config. See https://docs.ray.io/en/latest/serve/multi-app.html.
+  serveConfigV2: |
+    {{ .Values.serveConfig }}
+  serveService:
+    metadata:
+      name: {{ .Release.Name }}-serve
+    spec:
+      type: ClusterIP
+      ports:
+        - appProtocol: tcp
+          name: serve
+          port: 8000
+          protocol: TCP
+          targetPort: 8000
+  rayClusterConfig:
+    rayVersion: {{ .Values.version }} # should match the Ray version in the image of the containers
+    enableInTreeAutoscaling: true
+    autoscalerOptions:
+      upscalingMode: Default
+      idleTimeoutSeconds: 60
+      env:
+        - name: AUTOSCALER_UPDATE_INTERVAL_S
+          value: "5"
+    headGroupSpec:
+      rayStartParams:
+        num-cpus: "0"
+        num-gpus: "0"
+      template:
+        spec:
+          containers:
+          - name: ray-head
+            image: {{ print .Values.image ":" .Values.imageTag }}
+            imagePullPolicy: Always
+            resources:
+              {{ .Values.workerGroupResources }}
+            volumeMounts:
+            - name: cvmfs-volume
+              mountPath:  /cvmfs
+            - name: ray-logs
+              mountPath: /tmp/ray
+          - name: fluentbit
+            image: fluent/fluent-bit:3.2.2
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 100m
+                memory: 128Mi
+            volumeMounts:
+            - mountPath: /tmp/ray
+              name: ray-logs
+            - mountPath: /fluent-bit/etc/fluent-bit.conf
+              subPath: fluent-bit.conf
+              name: fluentbit-config 
+          imagePullSecrets:
+          - name: harbor-registry
+          - name: dockerconfigjson-serviceaccount
+          volumes:
+          - name: cvmfs-volume
+            {{ if eq .Values.cvmfs "persistentVolume" }}
+            {{ template "cvmfsPersistenVolume" }}
+            {{ else if eq .Values.cvmfs "hostPath" }}
+            {{ template "cvmfsHostPath" }}
+            {{ end }}
+          - name: ray-logs
+            emptyDir: {}
+          - name: fluentbit-config
+            configMap:
+              name: fluentbit-config
+    workerGroupSpecs:
+    # the pod replicas in this group typed worker
+    - replicas: {{ .Values.podReplicas }}
+      minReplicas: {{ .Values.minPodReplicas }}
+      maxReplicas: {{ .Values.maxPodReplicas }}
+      # logical group name, for this called small-group, also can be functional
+      groupName: tasks
+      rayStartParams: {}
+      #pod template
+      template:
+        spec:
+          containers:
+          - name: ray-worker # must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character (e.g. 'my-name',  or '123-abc'
+            image: {{ print .Values.image ":" .Values.imageTag }} 
+            imagePullPolicy: Always
+            resources:
+              {{ .Values.workerGroupResources }}
+            volumeMounts:
+            - name: cvmfs-volume
+              mountPath:  /cvmfs
+          imagePullSecrets:
+          - name: harbor-registry
+          - name: dockerconfigjson-serviceaccount
+          volumes:
+          - name: cvmfs-volume
+            {{ if eq .Values.cvmfs "persistentVolume" }}
+            {{ template "cvmfsPersistenVolume" }}
+            {{ else if eq .Values.cvmfs "hostPath" }}
+            {{ template "cvmfsHostPath" }}
+            {{ end }}
