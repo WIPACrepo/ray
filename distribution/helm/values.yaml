@@ -1,24 +1,38 @@
-image: harbor.icecube.aq/wipac/i3_ray_serve
-imageTag: v0.3.1-alpha
-cvmfs: persistentVolume
-rayVersion: 2.52.0
+global:
+  image: harbor.icecube.aq/wipac/i3_ray_serve
+  imageTag: v0.3.1-alpha
+  cvmfs: persistentVolume
+  rayVersion: 2.52.0
+  hostname: i3ray.nrp-nautilus.io
+ingress:
+  enabled: true
+  ingressClassName: haproxy
+  issuer:
+    enabled: true
+    issuerEmail: ""
+    issuerSecretName: issuer-account-key
+gatewayAPI:
+  enable: false
+fluentBit:
+  imageTag: 3.2.2
+  output: victorialogs
 serveConfig:
   applications:
-  - name: i3_ray_serve
-    route_prefix: /
-    import_path: server:model
-    deployments:
-    - name: TglauchClassifier
-      ray_actor_options:
-        num-gpus: 1
-        runtime_env:
-          env_vars:
-            LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}:/home/ray/anaconda3/lib
-      max_ongoing_requests: 100
-      autoscaling_config:
-        target_ongoing_requests: 2
-        min_replicas: 5
-        max_replicas: 60
+    - name: i3_ray_serve
+      route_prefix: /
+      import_path: server:model
+      deployments:
+        - name: TglauchClassifier
+          ray_actor_options:
+            num-gpus: 1
+            runtime_env:
+              env_vars:
+                LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}:/home/ray/anaconda3/lib
+          max_ongoing_requests: 100
+          autoscaling_config:
+            target_ongoing_requests: 2
+            min_replicas: 5
+            max_replicas: 60
 headGroupResources:
   limits:
     cpu: "3"
@@ -35,3 +49,7 @@ workerGroupResources:
     cpu: "10"
     memory: "15Gi"
     nvidia.com/gpu: 1
+scaling:
+  podReplicas: 0
+  minPodReplicas: 0
+  maxPodReplicas: 5

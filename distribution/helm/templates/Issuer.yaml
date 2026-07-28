@@ -1,4 +1,4 @@
-{{ if .Values.issuer.enabled }}
+{{ if .Values.ingress.issuer.enabled }}
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
@@ -6,7 +6,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   acme:
-    email: {{ .Values.issuerEmail }}
+    email: {{ .Values.ingress.issuer.issuerEmail }}
     preferredChain: ""
     privateKeySecretRef:
       name: issuer-account-key

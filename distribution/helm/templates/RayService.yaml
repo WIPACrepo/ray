@@ -2,11 +2,10 @@ apiVersion: ray.io/v1
 kind: RayService
 metadata:
   name: {{ .Release.Name }}-serve
-  namespace: {{ .Realse.Namespace }}
+  namespace: {{ .Release.Namespace }}
 spec:
-  # serveConfigV2 takes a yaml multi-line scalar, which should be a Ray Serve multi-application config. See https://docs.ray.io/en/latest/serve/multi-app.html.
   serveConfigV2: |
-    {{ .Values.serveConfig }}
+    {{- toYaml .Values.serveConfig | nindent 4 }}
   serveService:
     metadata:
       name: {{ .Release.Name }}-serve
@@ -19,7 +18,7 @@ spec:
           protocol: TCP
           targetPort: 8000
   rayClusterConfig:
-    rayVersion: {{ .Values.version }} # should match the Ray version in the image of the containers
+    rayVersion: {{ .Values.global.rayVersion }}
     enableInTreeAutoscaling: true
     autoscalerOptions:
       upscalingMode: Default
@@ -35,17 +34,16 @@ spec:
         spec:
           containers:
           - name: ray-head
-            image: {{ print .Values.image ":" .Values.imageTag }}
+            image: {{ print .Values.global.image ":" .Values.global.imageTag }}
             imagePullPolicy: Always
-            resources:
-              {{ .Values.workerGroupResources }}
+            resources: {{ toYaml .Values.headGroupResources | nindent 14 }}
             volumeMounts:
             - name: cvmfs-volume
               mountPath:  /cvmfs
             - name: ray-logs
               mountPath: /tmp/ray
           - name: fluentbit
-            image: fluent/fluent-bit:3.2.2
+            image: fluent/fluent-bit:{{ .Values.fluentbit.imageTag }}
             resources:
               requests:
                 cpu: 100m
@@ -64,33 +62,29 @@ spec:
           - name: dockerconfigjson-serviceaccount
           volumes:
           - name: cvmfs-volume
-            {{ if eq .Values.cvmfs "persistentVolume" }}
-            {{ template "cvmfsPersistenVolume" }}
-            {{ else if eq .Values.cvmfs "hostPath" }}
-            {{ template "cvmfsHostPath" }}
-            {{ end }}
+            {{- if eq .Values.global.cvmfs "persistentVolume" }}
+            {{- include "cvmfsPersistentVolume" . | indent 12 }}
+            {{- else if eq .Values.global.cvmfs "hostPath" }}
+            {{- include "cvmfsHostPath" . | nindent 12 }}
+            {{- end }}
           - name: ray-logs
             emptyDir: {}
           - name: fluentbit-config
             configMap:
               name: fluentbit-config
     workerGroupSpecs:
-    # the pod replicas in this group typed worker
-    - replicas: {{ .Values.podReplicas }}
-      minReplicas: {{ .Values.minPodReplicas }}
-      maxReplicas: {{ .Values.maxPodReplicas }}
-      # logical group name, for this called small-group, also can be functional
+    - replicas: {{ .Values.scaling.podReplicas }}
+      minReplicas: {{ .Values.scaling.minPodReplicas }}
+      maxReplicas: {{ .Values.scaling.maxPodReplicas }}
       groupName: tasks
       rayStartParams: {}
-      #pod template
       template:
         spec:
           containers:
-          - name: ray-worker # must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character (e.g. 'my-name',  or '123-abc'
-            image: {{ print .Values.image ":" .Values.imageTag }} 
+          - name: ray-worker
+            image: {{ print .Values.global.image ":" .Values.global.imageTag }} 
             imagePullPolicy: Always
-            resources:
-              {{ .Values.workerGroupResources }}
+            resources: {{ toYaml .Values.headGroupResources | nindent 14 }}
             volumeMounts:
             - name: cvmfs-volume
               mountPath:  /cvmfs
@@ -99,8 +93,8 @@ spec:
           - name: dockerconfigjson-serviceaccount
           volumes:
           - name: cvmfs-volume
-            {{ if eq .Values.cvmfs "persistentVolume" }}
-            {{ template "cvmfsPersistenVolume" }}
-            {{ else if eq .Values.cvmfs "hostPath" }}
-            {{ template "cvmfsHostPath" }}
-            {{ end }}
+            {{- if eq .Values.global.cvmfs "persistentVolume" }}
+            {{- include "cvmfsPersistentVolume" . | indent 12 }}
+            {{- else if eq .Values.global.cvmfs "hostPath" }}
+            {{- include "cvmfsHostPath" . | indent 12 }}
+            {{- end }}
