@@ -1,0 +1,23 @@
+{{ if .Values.ingress.issuer.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt
+  namespace: {{ .Release.Namespace }}
+spec:
+  acme:
+    email: {{ .Values.ingress.issuer.issuerEmail }}
+    preferredChain: ""
+    privateKeySecretRef:
+      name: issuer-account-key
+    server: https://acme-v02.api.letsencrypt.org/directory
+    solvers:
+    - http01:
+        ingress:
+          class: {{ .Values.ingressClassName }}
+          ingressTemplate:
+            metadata:
+              annotations:
+                ingress.kubernetes.io/ssl-redirect: "false"
+          serviceType: ClusterIP
+{{ end }}

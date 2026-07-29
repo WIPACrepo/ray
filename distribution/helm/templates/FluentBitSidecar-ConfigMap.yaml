@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentbit-config
+data:
+  fluent-bit.conf: |
+    [INPUT]
+        Name tail
+        Path /tmp/ray/session_latest/logs/*
+        Tag ray
+        Path_Key true
+        Refresh_Interval 5
+    [FILTER]
+        Name modify
+        Match ray
+        Rename true component_log
+    {{ if eq .Values.fluentBit.output "victorialogs" }}
+    [FILTER]
+        Name lua
+        Match ray
+        Script split.lua
+        Call cb_split
+    [OUTPUT]
+        Name stdout
+        Match ray
+        format json
+    {{ else if eq .Values.fluentBit.output "stdout" }}
+    [OUTPUT]
+        Name stdout
+        Match ray
+        format json
+
