@@ -43,7 +43,7 @@ spec:
             - name: ray-logs
               mountPath: /tmp/ray
           - name: fluentbit
-            image: fluent/fluent-bit:{{ .Values.fluentbit.imageTag }}
+            image: {{ print "fluent/fluent-bit:" .Values.fluentBit.imageTag }}
             resources:
               requests:
                 cpu: 100m

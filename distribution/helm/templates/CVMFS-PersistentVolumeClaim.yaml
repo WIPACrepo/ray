@@ -1,0 +1,13 @@
+{{ if eq .Values.global.cvmfs "persistentVolume" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cvmfs-volume
+spec:
+  accessModes:
+  - ReadOnlyMany
+  resources:
+    requests:
+      storage: 1
+  storageClassName: cvmfs
+{{ end }}
