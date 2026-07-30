@@ -15,18 +15,22 @@ data:
         Match ray
         Rename true component_log
     {{ if eq .Values.fluentBit.output "victorialogs" }}
-    [FILTER]
-        Name lua
-        Match ray
-        Script split.lua
-        Call cb_split
     [OUTPUT]
-        Name stdout
-        Match ray
-        format json
+        Name                es
+        Match               ray.raw
+        Host                victorialogs.icecube.aq
+        Port                443
+        Path                insert/elasticsearch/
+        Index               ray-logs
+        Type                _doc
+        Suppress_Type_Name  On
+        Generate_ID         Off
+        Header              VL-Time-Field date
+        Header              VL-Msg-Field log
+        Header              VL-Stream-Fields component_log
+        tls                 On
     {{ else if eq .Values.fluentBit.output "stdout" }}
     [OUTPUT]
         Name stdout
         Match ray
         format json
-
