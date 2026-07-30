@@ -1,4 +1,4 @@
-{{ if .Values.ingress.issuer.enabled }}
+{{- if .Values.ingress.issuer.enabled }}
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
@@ -20,4 +20,4 @@ spec:
               annotations:
                 ingress.kubernetes.io/ssl-redirect: "false"
           serviceType: ClusterIP
-{{ end }}
+{{- end }}
