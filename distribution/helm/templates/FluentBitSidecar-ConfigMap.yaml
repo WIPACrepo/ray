@@ -34,3 +34,4 @@ data:
         Name stdout
         Match ray
         format json
+    {{ end }}
