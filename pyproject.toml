@@ -16,6 +16,7 @@ dependencies = [
     'tensorflow',
     'tensorrt',
     'torch',
+    'urllib3<2.4.0',
     'wipac-dev-tools',
     'wipac-rest-tools',
 ]
