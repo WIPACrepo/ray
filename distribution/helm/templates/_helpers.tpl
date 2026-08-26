@@ -1,6 +1,6 @@
 {{- define "cvmfsPersistentVolume" }}
 persistentVolumeClaim:
-  claimName: cvmfs
+  claimName: cvmfs-volume
 {{- end }}
 {{- define "cvmfsHostPath" }}
 hostPath:
