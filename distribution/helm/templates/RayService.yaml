@@ -35,11 +35,14 @@ spec:
           containers:
           - name: ray-head
             image: {{ print .Values.global.image ":" .Values.global.imageTag }}
+            env:
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
+            {{- end }}
             imagePullPolicy: Always
             resources: {{ toYaml .Values.headGroupResources | nindent 14 }}
-            volumeMounts:
-            - name: cvmfs-volume
-              mountPath:  /cvmfs
+            volumeMounts: {{ toYaml .Values.volumeMounts | nindent 14 }}
             - name: ray-logs
               mountPath: /tmp/ray
           - name: fluentbit
@@ -59,7 +62,6 @@ spec:
               name: fluentbit-config 
           imagePullSecrets:
           - name: harbor-registry
-          - name: dockerconfigjson-serviceaccount
           volumes:
           - name: cvmfs-volume
             {{- if eq .Values.global.cvmfs "persistentVolume" }}
@@ -82,15 +84,17 @@ spec:
         spec:
           containers:
           - name: ray-worker
-            image: {{ print .Values.global.image ":" .Values.global.imageTag }} 
+            image: {{ print .Values.global.image ":" .Values.global.imageTag }}
+            env:
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
+            {{- end }}              
             imagePullPolicy: Always
-            resources: {{ toYaml .Values.headGroupResources | nindent 14 }}
-            volumeMounts:
-            - name: cvmfs-volume
-              mountPath:  /cvmfs
+            resources: {{ toYaml .Values.workerGroupResources | nindent 14 }}
+            volumeMounts: {{ toYaml .Values.volumeMounts | nindent 14 }}
           imagePullSecrets:
           - name: harbor-registry
-          - name: dockerconfigjson-serviceaccount
           volumes:
           - name: cvmfs-volume
             {{- if eq .Values.global.cvmfs "persistentVolume" }}

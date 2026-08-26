@@ -37,6 +37,11 @@ serveConfig:
             target_ongoing_requests: 2
             min_replicas: 5
             max_replicas: 60
+volumeMounts:
+  - name: cvmfs-volume
+    mountPath: /cvmfs/icecube.opensciencegrid.org
+    mountPropagation: HostToContainer
+    subPath: icecube.opensciencegrid.org
 headGroupResources:
   limits:
     cpu: "3"
