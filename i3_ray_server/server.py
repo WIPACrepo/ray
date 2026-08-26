@@ -45,6 +45,13 @@ class EnvConfig:
     CI: bool = False  # github actions sets this to 'true'
     LOG_LEVEL: LoggerLevel = "INFO"
 
+    MODEL_NAME: str = "tglauch_classifier"
+    MODEL_VERSION: str = "3"
+    MODEL_REPO: str = "/cvmfs/icecube.opensciencegrid.org/users/briedel/ml/models"
+
+    MAX_BATCH_SIZE: int = 250
+    BATCH_WAIT_TIMEOUT_S: float = 0.001
+
 
 ENV = from_environment_as_dataclass(EnvConfig)
 LOGGER = logging.getLogger(__name__)
@@ -63,10 +70,11 @@ def _pkg_version(pkg: str) -> str:
 # Configuration
 # ---------------------------------------------------------------------------
 
-MODEL_NAME = "tglauch_classifier"
-MODEL_VERSION = "3"
+MODEL_NAME = ENV.MODEL_NAME
+MODEL_VERSION = ENV.MODEL_VERSION
+MODEL_REPO = ENV.MODEL_REPO
 MODEL_PATH = os.path.join(
-    "/cvmfs/icecube.opensciencegrid.org/users/briedel/ml/models",
+    MODEL_REPO,
     MODEL_NAME,
     MODEL_VERSION,
     "model.onnx",
@@ -75,10 +83,10 @@ MODEL_PATH = os.path.join(
 # Matches config.pbtxt trt_profile_max_shapes batch dimension.
 # Triton's max_batch_size (4000) is a queue-level limit; per-inference TRT
 # max is 250, so that's the right cap for Ray Serve batching.
-BATCH_MAX_SIZE = 250
+BATCH_MAX_SIZE = ENV.MAX_BATCH_SIZE
 
 # Matches config.pbtxt dynamic_batching.max_queue_delay_microseconds = 1000.
-BATCH_WAIT_TIMEOUT_S = 0.001
+BATCH_WAIT_TIMEOUT_S = ENV.BATCH_WAIT_TIMEOUT_S
 
 # TensorRT provider options, mirroring config.pbtxt gpu_execution_accelerator.
 # Profile shapes match the actual ONNX model: Input-Branch1 is rank-5
