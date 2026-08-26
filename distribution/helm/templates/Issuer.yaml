@@ -1,4 +1,4 @@
-{{- if .Values.ingress.issuer.enabled }}
+{{- if .Values.ingress.issuer.enable }}
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
@@ -14,7 +14,7 @@ spec:
     solvers:
     - http01:
         ingress:
-          class: {{ .Values.ingressClassName }}
+          class: {{ .Values.ingress.ingressClassName }}
           ingressTemplate:
             metadata:
               annotations:

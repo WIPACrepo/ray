@@ -5,11 +5,15 @@ global:
   rayVersion: 2.52.0
   hostname: i3ray.nrp-nautilus.io
 ingress:
-  enabled: true
+  enable: true
   ingressClassName: haproxy
+  rayMetrics:
+    path: /metrics
+    port: 8080
+    enable: true
   issuer:
-    enabled: true
-    issuerEmail: ""
+    enable: false
+    issuerEmail: "admin@icecube.wisc.edu"
     issuerSecretName: issuer-account-key
 gatewayAPI:
   enable: false
@@ -24,7 +28,7 @@ serveConfig:
       deployments:
         - name: TglauchClassifier
           ray_actor_options:
-            num-gpus: 1
+            num_gpus: 1
             runtime_env:
               env_vars:
                 LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}:/home/ray/anaconda3/lib
@@ -53,3 +57,6 @@ scaling:
   podReplicas: 0
   minPodReplicas: 0
   maxPodReplicas: 5
+metrics:
+  podMonitors:
+    enable: false

@@ -16,18 +16,12 @@ data:
         Rename true component_log
     {{ if eq .Values.fluentBit.output "victorialogs" }}
     [OUTPUT]
-        Name                es
-        Match               ray.raw
-        Host                victorialogs.icecube.aq
-        Port                443
-        Path                insert/elasticsearch/
-        Index               ray-logs
-        Type                _doc
-        Suppress_Type_Name  On
-        Generate_ID         Off
-        Header              VL-Time-Field date
-        Header              VL-Msg-Field log
-        Header              VL-Stream-Fields component_log
+        Name                http
+        Match               *
+        host                victorialogs.icecube.aq
+        port                443
+        uri                 /insert/jsonline?_stream_fields=stream&_msg_field=log&_time_field=date
+        format              json_lines
         tls                 On
     {{ else if eq .Values.fluentBit.output "stdout" }}
     [OUTPUT]
