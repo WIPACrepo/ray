@@ -11,10 +11,10 @@ build-backend = "setuptools.build_meta"
 [project]
 dependencies = [
     'numpy',
-    'onnxruntime-gpu[cuda,cudnn]',
+    'onnxruntime-gpu[cuda,cudnn]==1.22',
     'ray[serve]',
     'tensorflow',
-    'tensorrt',
+    'tensorrt==10.9',
     'torch',
     'urllib3<2.4.0',
     'wipac-dev-tools',
