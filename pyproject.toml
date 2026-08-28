@@ -11,7 +11,7 @@ build-backend = "setuptools.build_meta"
 [project]
 dependencies = [
     'numpy',
-    'onnxruntime-gpu[cuda,cudnn]==1.22',
+    'onnxruntime-gpu[cuda,cudnn]',
     'ray[serve]',
     'tensorflow',
     'tensorrt<10.10.0',

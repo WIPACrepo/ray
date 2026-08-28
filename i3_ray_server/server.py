@@ -26,8 +26,6 @@ from typing import Any
 import numpy as np
 import onnxruntime as ort  # type: ignore[unresolved-import,import-untyped]
 import ray
-import torch
-import tensorrt
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from ray import serve
@@ -239,6 +237,9 @@ class TglauchClassifier:
     """Ray Serve deployment serving tglauch_classifier via ONNX Runtime + TRT."""
 
     def __init__(self):
+        import torch
+        import tensorrt
+
         providers = [
             ("TensorrtExecutionProvider", _TRT_PROVIDER_OPTIONS),
             "CUDAExecutionProvider",
