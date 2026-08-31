@@ -23,6 +23,8 @@ import signal
 import time
 from typing import Any
 
+import torch
+import tensorrt
 import numpy as np
 import onnxruntime as ort  # type: ignore[unresolved-import,import-untyped]
 import ray
@@ -50,6 +52,8 @@ class EnvConfig:
 
     MAX_BATCH_SIZE: int = 250
     BATCH_WAIT_TIMEOUT_S: float = 0.001
+
+    TRT_MAX_WORKSPACE_SIZE: int = 12_884_901_888
 
 
 ENV = from_environment_as_dataclass(EnvConfig)
@@ -93,7 +97,7 @@ BATCH_WAIT_TIMEOUT_S = ENV.BATCH_WAIT_TIMEOUT_S
 # trt_engine_cache_path must be rebuilt after editing these dims.
 _TRT_PROVIDER_OPTIONS: dict[str, Any] = {
     "trt_fp16_enable": True,
-    "trt_max_workspace_size": 12_884_901_888,
+    "trt_max_workspace_size": ENV.TRT_MAX_WORKSPACE_SIZE,
     "trt_engine_cache_enable": True,
     "trt_engine_cache_path": "/tmp/trt_cache",
     "trt_timing_cache_enable": True,
@@ -237,9 +241,6 @@ class TglauchClassifier:
     """Ray Serve deployment serving tglauch_classifier via ONNX Runtime + TRT."""
 
     def __init__(self):
-        import torch
-        import tensorrt
-
         providers = [
             ("TensorrtExecutionProvider", _TRT_PROVIDER_OPTIONS),
             "CUDAExecutionProvider",
