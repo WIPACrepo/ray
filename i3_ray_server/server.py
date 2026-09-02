@@ -422,7 +422,6 @@ class TglauchClassifier:
     @serve.batch(
         max_batch_size=BATCH_MAX_SIZE,
         batch_wait_timeout_s=BATCH_WAIT_TIMEOUT_S,
-        batch_size_fn=lambda arrays: sum(a.size for a in arrays),
     )
     async def _run_inference(self, input_arrays: list[np.ndarray]) -> list[np.ndarray]:
         """Run batched ONNX inference.
