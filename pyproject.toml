@@ -14,7 +14,7 @@ dependencies = [
     'onnxruntime-gpu[cuda,cudnn]',
     'ray[serve]',
     'tensorflow',
-    'tensorrt',
+    'tensorrt<10.10.0',
     'torch',
     'urllib3<2.4.0',
     'wipac-dev-tools',

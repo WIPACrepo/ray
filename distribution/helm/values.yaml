@@ -37,6 +37,15 @@ serveConfig:
             target_ongoing_requests: 2
             min_replicas: 5
             max_replicas: 60
+env:
+  LOG_LEVEL: INFO
+  AUTH_AUDIENCE: ray-serve
+  AUTH_OPENID_URL: https://keycloak.icecube.wisc.edu/auth/realms/IceCube
+  MODEL_NAME: tglauch_classifier
+  MODEL_VERSION: "3"
+  MODEL_REPO: /cvmfs/icecube.opensciencegrid.org/users/briedel/ml/models
+  MAX_BATCH_SIZE: 250
+  BATCH_WAIT_TIMEOUT_S: 0.001
 volumeMounts:
   - name: cvmfs-volume
     mountPath: /cvmfs/icecube.opensciencegrid.org
