@@ -252,12 +252,7 @@ class TglauchClassifier:
     """Ray Serve deployment serving tglauch_classifier via ONNX Runtime + TRT."""
 
     def __init__(self):
-        providers = [
-            ("TensorrtExecutionProvider", _TRT_PROVIDER_OPTIONS),
-            "CUDAExecutionProvider",
-            # CPU fallback — remove if GPU is guaranteed.
-            "CPUExecutionProvider",
-        ]
+        providers = EXECUTION_PROVIDER
         sess_options = ort.SessionOptions()
         # Matches config.pbtxt optimization.graph.level = 1.
         sess_options.graph_optimization_level = (
