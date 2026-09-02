@@ -55,6 +55,8 @@ class EnvConfig:
 
     TRT_MAX_WORKSPACE_SIZE: int = 12_884_901_888
 
+    EXECUTION_PROVIDER: str = "TensorrtExecutionProvider"
+
 
 ENV = from_environment_as_dataclass(EnvConfig)
 LOGGER = logging.getLogger(__name__)
@@ -72,7 +74,6 @@ def _pkg_version(pkg: str) -> str:
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-
 MODEL_NAME = ENV.MODEL_NAME
 MODEL_VERSION = ENV.MODEL_VERSION
 MODEL_REPO = ENV.MODEL_REPO
@@ -107,6 +108,16 @@ _TRT_PROVIDER_OPTIONS: dict[str, Any] = {
     "trt_profile_max_shapes": "Input-Branch1:250x10x10x60x16",
     "trt_profile_opt_shapes": "Input-Branch1:100x10x10x60x16",
 }
+
+# Set our execution provider for ONNX model; default to CUDA, or TensorRT if provided from ENV with fallbacks to CUDA and CPU
+cudaExecutionProvider = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+if ENV.EXECUTION_PROVIDER == "TensorrtExecutionProvider":
+    EXECUTION_PROVIDER = [
+        ("TensorrtExecutionProvider", _TRT_PROVIDER_OPTIONS)
+    ] + cudaExecutionProvider
+else:
+    EXECUTION_PROVIDER = cudaExecutionProvider
 
 # Map from V2 datatype strings to numpy dtypes — mirrors the client's _V2_DTYPE_TO_NUMPY.
 _V2_DTYPE_TO_NUMPY: dict[str, Any] = {
@@ -422,6 +433,7 @@ class TglauchClassifier:
     @serve.batch(
         max_batch_size=BATCH_MAX_SIZE,
         batch_wait_timeout_s=BATCH_WAIT_TIMEOUT_S,
+        batch_size_fn=lambda arrays: sum(len(a) for a in arrays),
     )
     async def _run_inference(self, input_arrays: list[np.ndarray]) -> list[np.ndarray]:
         """Run batched ONNX inference.
