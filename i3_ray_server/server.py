@@ -21,13 +21,13 @@ import logging
 import os
 import signal
 import time
-from typing import Any
+from typing import Annotated, Any
 
-import torch
-import tensorrt
 import numpy as np
 import onnxruntime as ort  # type: ignore[unresolved-import,import-untyped]
 import ray
+import tensorrt  # noqa: F401
+import torch  # noqa: F401
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from ray import serve
@@ -199,7 +199,7 @@ class Auth:
 
     @staticmethod
     async def require_auth(
-        credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     ) -> dict[str, Any]:
         """FastAPI dependency that validates the Keycloak Bearer token.
 
@@ -335,7 +335,7 @@ class TglauchClassifier:
     @app.get(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}/ready")
     async def model_ready(
         self,
-        _claims: dict = Depends(Auth.require_auth),
+        _claims: Annotated[dict, Depends(Auth.require_auth)],
     ):
         """Model readiness probe."""
         LOGGER.debug(f"model_ready  model={MODEL_NAME!r} version={MODEL_VERSION}")
@@ -349,7 +349,7 @@ class TglauchClassifier:
     @app.get(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}")
     async def model_metadata(
         self,
-        _claims: dict = Depends(Auth.require_auth),
+        _claims: Annotated[dict, Depends(Auth.require_auth)],
     ):
         """Return V2 model metadata including input/output tensor specs."""
         # _MODEL_METADATA is fully populated in __init__ from the ONNX session,
@@ -366,7 +366,7 @@ class TglauchClassifier:
     async def infer(
         self,
         http_request: Request,
-        _claims: dict = Depends(Auth.require_auth),
+        _claims: Annotated[dict, Depends(Auth.require_auth)],
     ):
         """Accept a V2 infer request and return a V2 infer response."""
         request = await http_request.json()
