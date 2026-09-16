@@ -1,0 +1,103 @@
+{{- if .Values.global.clusterOnly }}
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:   
+  name: {{ .Release.Name }}-cluster
+  namespace: {{ .Release.Namespace }}
+spec:
+  rayVersion: {{ .Values.global.rayVersion }}
+  enableInTreeAutoscaling: true
+  autoscalerOptions:
+    upscalingMode: Default
+    idleTimeoutSeconds: 60
+    env:
+      - name: AUTOSCALER_UPDATE_INTERVAL_S
+        value: "5"
+  headGroupSpec:
+    rayStartParams:
+      num-cpus: "0"
+      num-gpus: "0"
+    template:
+      spec:
+        containers:
+        - name: ray-head
+          image: {{ print .Values.global.image ":" .Values.global.imageTag }}
+          env:
+          {{- range $key, $value := .Values.env }}
+          - name: {{ $key | quote }}
+            value: {{ $value | quote }}
+          {{- end }}
+          imagePullPolicy: Always
+          resources: {{ toYaml .Values.headGroupResources | nindent 12 }}
+          volumeMounts: {{ toYaml .Values.volumeMounts | nindent 10}}
+          - name: ray-logs
+            mountPath: /tmp/ray
+          - name: serve-config-v2
+            mountPath: /tmp/serve-config.yaml
+        - name: fluentbit
+          image: {{ print "fluent/fluent-bit:" .Values.fluentBit.imageTag }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+          - mountPath: /tmp/ray
+            name: ray-logs
+          - mountPath: /fluent-bit/etc/fluent-bit.conf
+            subPath: fluent-bit.conf
+            name: fluentbit-config 
+        imagePullSecrets:
+        - name: harbor-registry
+        volumes:
+        - name: cvmfs-volume
+          {{- if eq .Values.global.cvmfs "persistentVolume" }}
+          {{- include "cvmfsPersistentVolume" . | indent 10 }}
+          {{- else if eq .Values.global.cvmfs "hostPath" }}
+          {{- include "cvmfsHostPath" . | nindent 10 }}
+          {{- end }}
+        - name: ray-logs
+          emptyDir: {}
+        - name: fluentbit-config
+          configMap:
+            name: fluentbit-config
+        - name: serve-config-v2
+          configMap:
+            name: serve-config-v2
+  workerGroupSpecs:
+  - replicas: {{ .Values.scaling.podReplicas }}
+    minReplicas: {{ .Values.scaling.minPodReplicas }}
+    maxReplicas: {{ .Values.scaling.maxPodReplicas }}
+    groupName: tasks
+    rayStartParams: {}
+    template:
+      spec:
+        containers:
+        - name: ray-worker
+          image: {{ print .Values.global.image ":" .Values.global.imageTag }}
+          env:
+          {{- range $key, $value := .Values.env }}
+          - name: {{ $key | quote }}
+            value: {{ $value | quote }}
+          {{- end }}              
+          imagePullPolicy: Always
+          resources: {{ toYaml .Values.workerGroupResources | nindent 12 }}
+          volumeMounts: {{ toYaml .Values.volumeMounts | nindent 10 }}
+          - name: serve-config-v2
+            mountPath: /tmp/serve-config.yaml
+        imagePullSecrets:
+        - name: harbor-registry
+        volumes:
+        - name: cvmfs-volume
+          {{- if eq .Values.global.cvmfs "persistentVolume" }}
+          {{- include "cvmfsPersistentVolume" . | indent 10 }}
+          {{- else if eq .Values.global.cvmfs "hostPath" }}
+          {{- include "cvmfsHostPath" . | indent 10 }}
+          {{- end }}
+        - name: serve-config-v2
+          configMap:
+            name: serve-config-v2
+              
+{{- end }}

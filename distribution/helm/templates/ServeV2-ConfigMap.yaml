@@ -1,0 +1,9 @@
+{{- if .Values.global.clusterOnly }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: serve-config-v2
+data:
+  serveConfigV2: |
+    {{- toYaml .Values.serveConfig | nindent 4 }}
+{{- end }}
