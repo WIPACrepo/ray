@@ -45,10 +45,14 @@ spec:
               memory: 128Mi
           volumeMounts:
           - mountPath: /tmp/ray
-            name: ray-logs
+            name: ray-tmp
           - mountPath: /fluent-bit/etc/fluent-bit.conf
             subPath: fluent-bit.conf
-            name: fluentbit-config 
+            name: fluentbit-config
+          {{- if .Values.metrics.localPrometheus.enable }}
+          - {{- include "prometheusContainer" . | nindent 14 }}
+          {{- end }}
+
         imagePullSecrets:
         - name: harbor-registry
         volumes:
@@ -58,7 +62,7 @@ spec:
           {{- else if eq .Values.global.cvmfs "hostPath" }}
           {{- include "cvmfsHostPath" . | nindent 10 }}
           {{- end }}
-        - name: ray-logs
+        - name: ray-tmp
           emptyDir: {}
         - name: fluentbit-config
           configMap:
@@ -66,6 +70,9 @@ spec:
         - name: serve-config-v2
           configMap:
             name: serve-config-v2
+        {{- if .Values.metrics.localPrometheus.enable }}
+        - {{- include "prometheusConfigVolume" . | indent 12}}
+        {{- end }}
   workerGroupSpecs:
   - replicas: {{ .Values.scaling.podReplicas }}
     minReplicas: {{ .Values.scaling.minPodReplicas }}

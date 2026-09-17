@@ -4,7 +4,7 @@ global:
   cvmfs: persistentVolume
   rayVersion: 2.52.0
   hostname: i3ray.nrp-nautilus.io
-  clusterOnly: true
+  clusterOnly: false
 ingress:
   enable: true
   ingressClassName: haproxy
@@ -64,11 +64,11 @@ workerGroupResources:
   limits:
     cpu: "6"
     memory: "15Gi"
-    nvidia.com/a40: 1
+    nvidia.com/gpu: 1
   requests:
     cpu: "5"
     memory: "10Gi"
-    nvidia.com/a40: 1
+    nvidia.com/gpu: 1
 scaling:
   podReplicas: 1
   minPodReplicas: 0
