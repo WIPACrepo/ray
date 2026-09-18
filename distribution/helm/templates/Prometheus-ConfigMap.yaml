@@ -17,11 +17,8 @@ data:
       - files:
         - '/tmp/ray/prom_metrics_service_discovery.json'
     remote_write:
-    - url: https://mimir.icecube.aq/api/v1/push
+    - {{- toYaml .Values.metrics.localPrometheus.remoteWrite | indent 4 }}
       remote_timeout: 30s
-      headers:
-        X-Scope-OrgID: prometheus
-      name: mimir
       follow_redirects: true
       enable_http2: true
       queue_config:

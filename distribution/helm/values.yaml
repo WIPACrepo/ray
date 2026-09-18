@@ -74,5 +74,12 @@ scaling:
   minPodReplicas: 0
   maxPodReplicas: 10
 metrics:
+  localPrometheus:
+    enable: true
+    remoteWrite:
+      url: https://mimir.icecube.aq/api/v1/push
+      headers:
+        X-Scope-OrgID: prometheus
+      name: mimir
   podMonitors:
     enable: false
