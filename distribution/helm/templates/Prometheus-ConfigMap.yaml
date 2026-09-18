@@ -1,9 +1,39 @@
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-
-scrape_configs:
-- job_name: 'ray'
-  file_sd_configs:
-  - files:
-    - '/tmp/ray/prom_metrics_service_discovery.json'
+{{- if .Values.metrics.localPrometheus.enable }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: prometheus-nrp
+        prometheus: icecube-ml/ray
+    scrape_configs:
+    - job_name: 'ray'
+      file_sd_configs:
+      - files:
+        - '/tmp/ray/prom_metrics_service_discovery.json'
+    remote_write:
+    - url: https://mimir.icecube.aq/api/v1/push
+      remote_timeout: 30s
+      headers:
+        X-Scope-OrgID: prometheus
+      name: mimir
+      follow_redirects: true
+      enable_http2: true
+      queue_config:
+        capacity: 10000
+        max_shards: 50
+        min_shards: 1
+        max_samples_per_send: 2000
+        batch_send_deadline: 5s
+        min_backoff: 30ms
+        max_backoff: 5s
+      metadata_config:
+        send: true
+        send_interval: 1m
+        max_samples_per_send: 2000
+{{- end }

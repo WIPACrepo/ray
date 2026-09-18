@@ -18,6 +18,8 @@ args:
 volumeMounts:
 - mountPath: /etc/prometheus/config
   name: config
+- mountPath: /tmp/ray
+  name: ray-tmp
 {{- end }}
 {{- define "prometheusConfigVolume" }}
 name: config
