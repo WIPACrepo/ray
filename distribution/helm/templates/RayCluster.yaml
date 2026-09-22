@@ -28,7 +28,7 @@ spec:
             value: {{ $value | quote }}
           {{- end }}
           imagePullPolicy: Always
-          resources: {{ toYaml .Values.headGroupResources | nindent 12 }}
+          resources: {{ toYaml .Values.headGroup.resources | nindent 12 }}
           volumeMounts: {{ toYaml .Values.volumeMounts | nindent 10}}
           - name: ray-logs
             mountPath: /tmp/ray
@@ -45,10 +45,14 @@ spec:
               memory: 128Mi
           volumeMounts:
           - mountPath: /tmp/ray
-            name: ray-logs
+            name: ray-tmp
           - mountPath: /fluent-bit/etc/fluent-bit.conf
             subPath: fluent-bit.conf
-            name: fluentbit-config 
+            name: fluentbit-config
+          {{- if .Values.metrics.localPrometheus.enable }}
+          - {{- include "prometheusContainer" . | nindent 14 }}
+          {{- end }}
+
         imagePullSecrets:
         - name: harbor-registry
         volumes:
@@ -58,7 +62,7 @@ spec:
           {{- else if eq .Values.global.cvmfs "hostPath" }}
           {{- include "cvmfsHostPath" . | nindent 10 }}
           {{- end }}
-        - name: ray-logs
+        - name: ray-tmp
           emptyDir: {}
         - name: fluentbit-config
           configMap:
@@ -66,14 +70,21 @@ spec:
         - name: serve-config-v2
           configMap:
             name: serve-config-v2
+        {{- if .Values.metrics.localPrometheus.enable }}
+        - {{- include "prometheusConfigVolume" . | indent 12}}
+        {{- end }}
   workerGroupSpecs:
-  - replicas: {{ .Values.scaling.podReplicas }}
-    minReplicas: {{ .Values.scaling.minPodReplicas }}
-    maxReplicas: {{ .Values.scaling.maxPodReplicas }}
+  - replicas: {{ .Values.workerGroup.scaling.podReplicas }}
+    minReplicas: {{ .Values.workerGroup.scaling.minPodReplicas }}
+    maxReplicas: {{ .Values.workerGroup.scaling.maxPodReplicas }}
     groupName: tasks
     rayStartParams: {}
     template:
       spec:
+        {{- if .Values.workerGroup.affinity }}
+        affinity:
+          {{- toYaml .Values.workerGroup.affinity | nindent 12 }}
+        {{- end }}
         containers:
         - name: ray-worker
           image: {{ print .Values.global.image ":" .Values.global.imageTag }}
@@ -83,7 +94,7 @@ spec:
             value: {{ $value | quote }}
           {{- end }}              
           imagePullPolicy: Always
-          resources: {{ toYaml .Values.workerGroupResources | nindent 12 }}
+          resources: {{ toYaml .Values.workerGroup.resources | nindent 12 }}
           volumeMounts: {{ toYaml .Values.volumeMounts | nindent 10 }}
           - name: serve-config-v2
             mountPath: /tmp/serve-config.yaml

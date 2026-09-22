@@ -1,0 +1,21 @@
+{{- if .Values.metrics.localPrometheus.enable }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: prometheus-nrp
+        prometheus: icecube-ml/ray
+    scrape_configs:
+    - job_name: 'ray'
+      file_sd_configs:
+      - files:
+        - '/tmp/ray/prom_metrics_service_discovery.json'
+    remote_write:
+    {{- toYaml .Values.metrics.localPrometheus.remoteWrite | nindent 4 }}
+{{- end }}
