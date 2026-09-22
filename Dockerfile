@@ -18,6 +18,8 @@ RUN --mount=type=cache,target=/tmp/pip-cache \
 USER root
 RUN --mount=type=bind,source=.,target=/home/app/src,rw \
     --mount=type=cache,target=/tmp/pip-cache \
-    pip install /home/app/src
+    pip install /home/app/src && \
+    chown root:root `which py-spy` && \
+    chmod u+s `which py-spy`
 
 COPY i3_ray_server/* .
