@@ -28,7 +28,7 @@ spec:
             value: {{ $value | quote }}
           {{- end }}
           imagePullPolicy: Always
-          resources: {{ toYaml .Values.headGroupResources | nindent 12 }}
+          resources: {{ toYaml .Values.headGroup.resources | nindent 12 }}
           volumeMounts: {{ toYaml .Values.volumeMounts | nindent 10}}
           - name: ray-logs
             mountPath: /tmp/ray
@@ -74,13 +74,17 @@ spec:
         - {{- include "prometheusConfigVolume" . | indent 12}}
         {{- end }}
   workerGroupSpecs:
-  - replicas: {{ .Values.scaling.podReplicas }}
-    minReplicas: {{ .Values.scaling.minPodReplicas }}
-    maxReplicas: {{ .Values.scaling.maxPodReplicas }}
+  - replicas: {{ .Values.workerGroup.scaling.podReplicas }}
+    minReplicas: {{ .Values.workerGroup.scaling.minPodReplicas }}
+    maxReplicas: {{ .Values.workerGroup.scaling.maxPodReplicas }}
     groupName: tasks
     rayStartParams: {}
     template:
       spec:
+        {{- if .Values.workerGroup.affinity }}
+        affinity:
+          {{- toYaml .Values.workerGroup.affinity | nindent 12 }}
+        {{- end }}
         containers:
         - name: ray-worker
           image: {{ print .Values.global.image ":" .Values.global.imageTag }}
@@ -90,7 +94,7 @@ spec:
             value: {{ $value | quote }}
           {{- end }}              
           imagePullPolicy: Always
-          resources: {{ toYaml .Values.workerGroupResources | nindent 12 }}
+          resources: {{ toYaml .Values.workerGroup.resources | nindent 12 }}
           volumeMounts: {{ toYaml .Values.volumeMounts | nindent 10 }}
           - name: serve-config-v2
             mountPath: /tmp/serve-config.yaml

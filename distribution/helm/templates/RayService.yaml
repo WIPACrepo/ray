@@ -42,10 +42,10 @@ spec:
               value: {{ $value | quote }}
             {{- end }}
             imagePullPolicy: Always
-            resources: {{ toYaml .Values.headGroupResources | nindent 14 }}
+            resources: {{ toYaml .Values.headGroup.resources | nindent 14 }}
             volumeMounts: 
             {{- toYaml .Values.volumeMounts | nindent 12 }}
-            - name: ray-logs
+            - name: ray-tmp
               mountPath: /tmp/ray
           - name: fluentbit
             image: {{ print "fluent/fluent-bit:" .Values.fluentBit.imageTag }}
@@ -80,16 +80,20 @@ spec:
             configMap:
               name: fluentbit-config
           {{- if .Values.metrics.localPrometheus.enable }}
-          - {{- include "prometheusConfigVolume" . | indent 12}}
+          - {{- include "prometheusConfigVolume" . | indent 12 }}
           {{- end }}
     workerGroupSpecs:
-    - replicas: {{ .Values.scaling.podReplicas }}
-      minReplicas: {{ .Values.scaling.minPodReplicas }}
-      maxReplicas: {{ .Values.scaling.maxPodReplicas }}
+    - replicas: {{ .Values.workerGroup.scaling.podReplicas }}
+      minReplicas: {{ .Values.workerGroup.scaling.minPodReplicas }}
+      maxReplicas: {{ .Values.workerGroup.scaling.maxPodReplicas }}
       groupName: tasks
       rayStartParams: {}
       template:
         spec:
+          {{- if .Values.workerGroup.affinity }}
+          affinity:
+            {{- toYaml .Values.workerGroup.affinity | nindent 12 }}
+          {{- end }}
           containers:
           - name: ray-worker
             image: {{ print .Values.global.image ":" .Values.global.imageTag }}
@@ -99,7 +103,7 @@ spec:
               value: {{ $value | quote }}
             {{- end }}              
             imagePullPolicy: Always
-            resources: {{ toYaml .Values.workerGroupResources | nindent 14 }}
+            resources: {{ toYaml .Values.workerGroup.resources | nindent 14 }}
             volumeMounts: 
             {{- toYaml .Values.volumeMounts | nindent 12 }}
           imagePullSecrets:

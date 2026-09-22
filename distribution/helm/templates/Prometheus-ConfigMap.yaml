@@ -17,20 +17,5 @@ data:
       - files:
         - '/tmp/ray/prom_metrics_service_discovery.json'
     remote_write:
-    - {{- toYaml .Values.metrics.localPrometheus.remoteWrite | indent 4 }}
-      remote_timeout: 30s
-      follow_redirects: true
-      enable_http2: true
-      queue_config:
-        capacity: 10000
-        max_shards: 50
-        min_shards: 1
-        max_samples_per_send: 2000
-        batch_send_deadline: 5s
-        min_backoff: 30ms
-        max_backoff: 5s
-      metadata_config:
-        send: true
-        send_interval: 1m
-        max_samples_per_send: 2000
-{{- end }
+    {{- toYaml .Values.metrics.localPrometheus.remoteWrite | nindent 4 }}
+{{- end }}
