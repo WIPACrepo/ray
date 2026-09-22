@@ -5,6 +5,7 @@ global:
   rayVersion: 2.52.0
   hostname: i3ray.nrp-nautilus.io
   clusterOnly: false
+  initializingTimeout: 15m
 ingress:
   enable: true
   ingressClassName: haproxy
@@ -33,9 +34,9 @@ serveConfig:
             runtime_env:
               env_vars:
                 LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}:/home/ray/anaconda3/lib
-          max_ongoing_requests: 50
+          max_ongoing_requests: 200
           autoscaling_config:
-            target_ongoing_requests: 5
+            target_ongoing_requests: 10
             min_replicas: 5
             max_replicas: 25
 env:
@@ -48,6 +49,7 @@ env:
   MAX_BATCH_SIZE: 100
   BATCH_WAIT_TIMEOUT_S: 0.05
   EXECUTION_PROVIDER: CUDAExecutionProvider
+  RAY_DASHBOARD_ENABLE_PROFILING: 1
 volumeMounts:
   - name: cvmfs-volume
     mountPath: /cvmfs/icecube.opensciencegrid.org

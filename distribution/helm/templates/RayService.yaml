@@ -2,6 +2,8 @@
 apiVersion: ray.io/v1
 kind: RayService
 metadata:
+  annotations:
+    ray.io/initializing-timeout:  {{ .Values.global.initializingTimeout }}
   name: {{ .Release.Name }}-serve
   namespace: {{ .Release.Namespace }}
 spec:
