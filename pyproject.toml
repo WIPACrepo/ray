@@ -10,6 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 dependencies = [
+    'memray',
     'numpy',
     'onnxruntime-gpu[cuda,cudnn]',
     'py-spy',
