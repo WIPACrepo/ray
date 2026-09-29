@@ -21,5 +21,6 @@ RUN --mount=type=bind,source=.,target=/home/app/src,rw \
     pip install /home/app/src && \
     chown root:root `which py-spy` && \
     chmod u+s `which py-spy`
+RUN apt install gdb
 
 COPY i3_ray_server/* .
