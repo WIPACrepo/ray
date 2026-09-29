@@ -20,8 +20,16 @@ RUN --mount=type=bind,source=.,target=/home/app/src,rw \
     --mount=type=cache,target=/tmp/pip-cache \
     pip install /home/app/src && \
     chown root:root `which py-spy` && \
-    chmod u+s `which py-spy`
+    chmod u+s `which py-spy` && \
+    LD_LIBRARY_PATH=$LD_LIBRARY_PATH:\
+    /home/ray/anaconda3/lib/python3.13/site-packages/nvidia/cuda_runtime/lib/:\
+    /home/ray/anaconda3/lib/python3.13/site-packages/nvidia/cu13/lib/:\
+    /home/ray/anaconda3/lib/python3.13/site-packages/nvidia/cudnn/lib/:\
+    /home/ray/anaconda3/lib/ && \
+    ldconfig
+
 RUN apt-get update && \
     apt-get install -y gdb
+
 
 COPY i3_ray_server/* .
