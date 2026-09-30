@@ -1,3 +1,29 @@
+
+FROM rayproject/ray:nightly-py313-gpu as build
+ARG DEBIAN_FRONTEND=noninteractive
+ARG PYTHON=3.13
+ARG HOSTTYPE=${HOSTTYPE:-x86_64}
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    zlib1g-dev \
+    libbz2-dev \
+    liblzma-dev \
+    autoconf \
+    cmake \
+    wget \
+    git
+
+WORKDIR /tmp
+
+RUN wget https://github.com/microsoft/mimalloc/releases/download/v3.5.3/mimalloc-v3.5.3-source.tar.gz && \
+    tar -xzf mimalloc-v3.5.3-source.tar.gz && \
+    cd mimalloc-v3.5.3-source && \
+    mkdir -p out/release && \
+    cd out/release && \
+    cmake ../.. && \
+    make && \
+    make install 
+
 FROM rayproject/ray:nightly-py313-gpu as stage
 # Set args for Python version
 ARG DEBIAN_FRONTEND=noninteractive
@@ -7,6 +33,9 @@ ARG RAY_UID=1000
 ARG RAY_GID=100
 
 FROM stage
+
+COPY --from=build /usr/local/lib/* /usr/local/lib/.
+COPY --from=build /usr/local/include/* /usr/local/include/.
 
 # Mount the entire build context (including '.git/') just for this step
 # NOTE:
@@ -26,8 +55,7 @@ ENV ANACONDA_SITE_PACKAGES=/home/ray/anaconda3/lib/python3.13/site-packages
 ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ANACONDA_SITE_PACKAGES/nvidia/cuda_runtime/lib:$ANACONDA_SITE_PACKAGES/nvidia/cu13/lib:$ANACONDA_SITE_PACKAGES/nvidia/cudnn/lib:/home/ray/anaconda3/lib
 RUN ldconfig
 
-RUN apt-get update && \
-    apt-get install -y gdb
-
+RUN apt-get update && apt-get install -y \
+    gdb
 
 COPY i3_ray_server/* .
