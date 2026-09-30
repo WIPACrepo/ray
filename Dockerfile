@@ -3,6 +3,7 @@ FROM rayproject/ray:nightly-py313-gpu as build
 ARG DEBIAN_FRONTEND=noninteractive
 ARG PYTHON=3.13
 ARG HOSTTYPE=${HOSTTYPE:-x86_64}
+USER root
 RUN apt-get update && apt-get install -y \
     build-essential \
     zlib1g-dev \
