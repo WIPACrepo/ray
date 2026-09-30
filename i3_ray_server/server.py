@@ -33,7 +33,7 @@ from rest_tools.utils import OpenIDAuth
 from wipac_dev_tools import from_environment_as_dataclass
 from wipac_dev_tools.logging_tools import LoggerLevel
 
-ort.preload_dlls(cuda=True, cudnn=True, msvc=False, directory=None)
+ort.preload_dlls(directory="")
 
 
 @dc.dataclass(frozen=True)
