@@ -26,14 +26,14 @@ from typing import Annotated, Any
 import numpy as np
 import onnxruntime as ort  # type: ignore[unresolved-import,import-untyped]
 import ray
-import tensorrt  # noqa: F401
-import torch  # noqa: F401
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from ray import serve
 from rest_tools.utils import OpenIDAuth
 from wipac_dev_tools import from_environment_as_dataclass
 from wipac_dev_tools.logging_tools import LoggerLevel
+
+ort.preload_dlls(cuda=True, cudnn=True, msvc=False, directory=None)
 
 
 @dc.dataclass(frozen=True)
@@ -113,6 +113,8 @@ _TRT_PROVIDER_OPTIONS: dict[str, Any] = {
 cudaExecutionProvider = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
 if ENV.EXECUTION_PROVIDER == "TensorrtExecutionProvider":
+    import tensorrt
+
     EXECUTION_PROVIDER = [
         ("TensorrtExecutionProvider", _TRT_PROVIDER_OPTIONS)
     ] + cudaExecutionProvider
