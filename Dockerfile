@@ -18,9 +18,10 @@ RUN apt-get update && apt-get install -y \
     git
 # Install MiMalloc drop-in replacement for 
 WORKDIR /tmp
-RUN wget https://github.com/microsoft/mimalloc/releases/download/${MIMALLOC_VERSION}/mimalloc-${MIMALLOC_VERSION}-source.tar.gz && \
+RUN set -x && \
+    wget https://github.com/microsoft/mimalloc/releases/download/${MIMALLOC_VERSION}/mimalloc-${MIMALLOC_VERSION}-source.tar.gz && \
     mkdir mimalloc-${MIMALLOC_VERSION} && \
-    tar -xzf mimalloc-${MIMALLOC_VERSION}-source.tar.gz && \
+    tar -xzf mimalloc-${MIMALLOC_VERSION}-source.tar.gz -C mimalloc-${MIMALLOC_VERSION} --strip-components=1 && \
     cd mimalloc-${MIMALLOC_VERSION} && \
     mkdir -p out/release && \
     cd out/release && \
