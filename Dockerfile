@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /tmp
 RUN wget https://github.com/microsoft/mimalloc/releases/download/${MIMALLOC_VERSION}/mimalloc-${MIMALLOC_VERSION}-source.tar.gz && \
     mkdir mimalloc-${MIMALLOC_VERSION} && \
-    tar -xzf mimalloc-${MIMALLOC_VERSION}source.tar.gz && \
+    tar -xzf mimalloc-${MIMALLOC_VERSION}-source.tar.gz && \
     cd mimalloc-${MIMALLOC_VERSION} && \
     mkdir -p out/release && \
     cd out/release && \
