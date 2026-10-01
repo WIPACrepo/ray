@@ -3,6 +3,7 @@ FROM rayproject/ray:nightly-py313-gpu as build
 ARG DEBIAN_FRONTEND=noninteractive
 ARG PYTHON=3.13
 ARG HOSTTYPE=${HOSTTYPE:-x86_64}
+ARG MIMALLOC_VERSION=${MIMALLOC_VERSION:-v3.5.3}
 USER root
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -13,12 +14,12 @@ RUN apt-get update && apt-get install -y \
     cmake \
     wget \
     git
-
+# Install MiMalloc drop-in replacement for 
 WORKDIR /tmp
-
-RUN wget https://github.com/microsoft/mimalloc/releases/download/v3.5.3/mimalloc-v3.5.3-source.tar.gz && \
-    tar -xzf mimalloc-v3.5.3-source.tar.gz && \
-    cd mimalloc-v3.5.3-source && \
+RUN wget https://github.com/microsoft/mimalloc/releases/download/${MIMALLOC_VERSION}/mimalloc-${MIMALLOC_VERSION}-source.tar.gz && \
+    mkdir mimalloc-${MIMALLOC_VERSION} && \
+    tar -xzf mimalloc-${MIMALLOC_VERSION}source.tar.gz && \
+    cd mimalloc-${MIMALLOC_VERSION} && \
     mkdir -p out/release && \
     cd out/release && \
     cmake ../.. && \
