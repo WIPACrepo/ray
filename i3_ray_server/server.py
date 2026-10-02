@@ -59,7 +59,7 @@ class EnvConfig:
 
 
 ENV = from_environment_as_dataclass(EnvConfig)
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("ray")
 LOGGER.setLevel(ENV.LOG_LEVEL)
 
 
@@ -260,6 +260,9 @@ class TglauchClassifier:
         sess_options.graph_optimization_level = (
             ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
         )
+        sess_options.enable_cpu_mem_arena = True
+        sess_options.enable_mem_pattern = True
+        sess_options.enable_profiling = True
         # Parallelism is handled by Ray Serve replicas (4 × 1 GPU each),
         # not by threading within a session. Keeping both thread counts at 1
         # avoids TRT context thread-safety issues.
