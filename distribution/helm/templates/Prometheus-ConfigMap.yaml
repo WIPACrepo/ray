@@ -16,6 +16,13 @@ data:
       file_sd_configs:
       - files:
         - '/tmp/ray/prom_metrics_service_discovery.json'
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_ray_io_cluster]
+        separator: ;
+        regex: (.*)
+        target_label: ray_io_cluster
+        replacement: $1
+        action: replace
     remote_write:
     {{- toYaml .Values.metrics.localPrometheus.remoteWrite | nindent 4 }}
 {{- end }}
