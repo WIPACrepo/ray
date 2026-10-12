@@ -26,14 +26,14 @@ from typing import Annotated, Any
 import numpy as np
 import onnxruntime as ort  # type: ignore[unresolved-import,import-untyped]
 import ray
-import tensorrt  # noqa: F401
-import torch  # noqa: F401
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from ray import serve
 from rest_tools.utils import OpenIDAuth
 from wipac_dev_tools import from_environment_as_dataclass
 from wipac_dev_tools.logging_tools import LoggerLevel
+
+ort.preload_dlls(directory="")
 
 
 @dc.dataclass(frozen=True)
@@ -59,7 +59,7 @@ class EnvConfig:
 
 
 ENV = from_environment_as_dataclass(EnvConfig)
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("ray")
 LOGGER.setLevel(ENV.LOG_LEVEL)
 
 
@@ -113,6 +113,8 @@ _TRT_PROVIDER_OPTIONS: dict[str, Any] = {
 cudaExecutionProvider = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
 if ENV.EXECUTION_PROVIDER == "TensorrtExecutionProvider":
+    import tensorrt
+
     EXECUTION_PROVIDER = [
         ("TensorrtExecutionProvider", _TRT_PROVIDER_OPTIONS)
     ] + cudaExecutionProvider
@@ -258,6 +260,9 @@ class TglauchClassifier:
         sess_options.graph_optimization_level = (
             ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
         )
+        sess_options.enable_cpu_mem_arena = True
+        sess_options.enable_mem_pattern = True
+        sess_options.enable_profiling = True
         # Parallelism is handled by Ray Serve replicas (4 × 1 GPU each),
         # not by threading within a session. Keeping both thread counts at 1
         # avoids TRT context thread-safety issues.
