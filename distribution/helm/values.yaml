@@ -1,11 +1,11 @@
 global:
   image: harbor.icecube.aq/wipac/i3_ray_serve
-  imageTag: v0.4.3-alpha
+  imageTag: v0.4.4-alpha-debug
   cvmfs: persistentVolume
   rayVersion: 2.52.0
   hostname: i3ray.nrp-nautilus.io
   clusterOnly: false
-  initializingTimeout: 15m
+  initializingTimeout: 20m
 ingress:
   enable: true
   ingressClassName: haproxy
@@ -34,7 +34,7 @@ serveConfig:
             runtime_env:
               env_vars:
                 LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}:/home/ray/anaconda3/lib
-          max_ongoing_requests: 200
+          max_ongoing_requests: 15
           autoscaling_config:
             target_ongoing_requests: 10
             min_replicas: 5
@@ -46,8 +46,8 @@ env:
   MODEL_NAME: tglauch_classifier
   MODEL_VERSION: "3"
   MODEL_REPO: /cvmfs/icecube.opensciencegrid.org/users/briedel/ml/models
-  MAX_BATCH_SIZE: 100
-  BATCH_WAIT_TIMEOUT_S: 0.05
+  MAX_BATCH_SIZE: 200
+  BATCH_WAIT_TIMEOUT_S: 0.01
   EXECUTION_PROVIDER: CUDAExecutionProvider
   RAY_DASHBOARD_ENABLE_PROFILING: 1
 volumeMounts:
@@ -83,11 +83,11 @@ workerGroup:
   resources:
     limits:
       cpu: "6"
-      memory: "15Gi"
+      memory: "30Gi"
       nvidia.com/gpu: 1
     requests:
       cpu: "5"
-      memory: "10Gi"
+      memory: "20Gi"
       nvidia.com/gpu: 1
   scaling:
     podReplicas: 1
