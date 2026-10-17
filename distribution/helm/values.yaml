@@ -54,6 +54,7 @@ env:
   BATCH_WAIT_TIMEOUT_S: 0.01
   EXECUTION_PROVIDER: CUDAExecutionProvider
   RAY_DASHBOARD_ENABLE_PROFILING: 1
+  LD_PRELOAD: /usr/local/lib/libmimalloc.so
 volumeMounts:
   - name: cvmfs-volume
     mountPath: /cvmfs/icecube.opensciencegrid.org
