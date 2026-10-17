@@ -257,9 +257,14 @@ class TglauchClassifier:
         providers = EXECUTION_PROVIDER
         sess_options = ort.SessionOptions()
         # Matches config.pbtxt optimization.graph.level = 1.
-        sess_options.graph_optimization_level = (
-            ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
-        )
+        if ENV.EXECUTION_PROVIDER == "TensorrtExecutionProvider":
+            sess_options.graph_optimization_level = (
+                ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
+            )
+        else:
+            sess_options.graph_optimization_level = (
+                ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+            )
         sess_options.enable_cpu_mem_arena = True
         sess_options.enable_mem_pattern = True
         sess_options.enable_profiling = True
