@@ -35,6 +35,10 @@ serveConfig:
               env_vars:
                 LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}:/home/ray/anaconda3/lib
           max_ongoing_requests: 15
+          max_queued_requests: 100
+          backpressure_config:
+            status_code: 429
+            retry_after_s: 10
           autoscaling_config:
             target_ongoing_requests: 10
             min_replicas: 5
