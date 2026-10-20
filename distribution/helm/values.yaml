@@ -35,12 +35,12 @@ serveConfig:
               env_vars:
                 LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}:/home/ray/anaconda3/lib
           max_ongoing_requests: 10
-          max_queued_requests: 100
+          max_queued_requests: 20
           backpressure_config:
             status_code: 429
             retry_after_s: 10
           autoscaling_config:
-            target_ongoing_requests: 10
+            target_ongoing_requests: 5
             min_replicas: 1
             max_replicas: 100
 env:
@@ -50,7 +50,7 @@ env:
   MODEL_NAME: tglauch_classifier
   MODEL_VERSION: "3"
   MODEL_REPO: /cvmfs/icecube.opensciencegrid.org/users/briedel/ml/models
-  MAX_BATCH_SIZE: 200
+  MAX_BATCH_SIZE: 100
   BATCH_WAIT_TIMEOUT_S: 0.01
   EXECUTION_PROVIDER: CUDAExecutionProvider
   RAY_DASHBOARD_ENABLE_PROFILING: 1
