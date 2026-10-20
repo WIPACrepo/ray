@@ -25,10 +25,11 @@ from typing import Annotated, Any
 
 import numpy as np
 import onnxruntime as ort  # type: ignore[unresolved-import,import-untyped]
-import ray
+from ray import serve
+from ray.serve.config import BackpressureConfig
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from ray import serve
 from rest_tools.utils import OpenIDAuth
 from wipac_dev_tools import from_environment_as_dataclass
 from wipac_dev_tools.logging_tools import LoggerLevel
@@ -248,7 +249,12 @@ app = FastAPI()
 # ---------------------------------------------------------------------------
 
 
-@serve.deployment()
+@serve.deployment(
+    backpressure_config=BackpressureConfig(
+        status_code=429,
+        retry_after_s=5,
+    ),
+)
 @serve.ingress(app)
 class TglauchClassifier:
     """Ray Serve deployment serving tglauch_classifier via ONNX Runtime + TRT."""
