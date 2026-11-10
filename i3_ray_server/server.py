@@ -5,12 +5,12 @@ Replaces the Triton server. Implements the KServe Open Inference Protocol
 (V2) HTTP API so existing clients using ray_serve.py work unchanged.
 
 Triton config.pbtxt equivalents:
-  - platform:          onnxruntime + TensorRT execution provider
-  - instance_group:    num_replicas=4, num_gpus=1 per replica
-  - max_batch_size:    4000 (Triton total); TRT profile max is 250 per call,
-                       so Ray Serve batching is capped at 250
-  - dynamic_batching:  @serve.batch with batch_wait_timeout_s=0.001 (1ms)
-  - version_policy:    version 3 hardcoded as MODEL_VERSION below
+    - platform:          onnxruntime + TensorRT execution provider
+    - instance_group:    num_replicas=4, num_gpus=1 per replica
+    - max_batch_size:    4000 (Triton total); TRT profile max is 250 per call,
+                         so Ray Serve batching is capped at 250
+    - dynamic_batching:  @serve.batch with batch_wait_timeout_s=0.001 (1ms)
+    - version_policy:    version 3 hardcoded as MODEL_VERSION below
 """
 
 import argparse
@@ -25,10 +25,11 @@ from typing import Annotated, Any
 
 import numpy as np
 import onnxruntime as ort  # type: ignore[unresolved-import,import-untyped]
-import ray
+from ray import serve  # type: ignore[unresolved-import,import-untyped]
+from ray.serve.config import BackpressureConfig  # type: ignore[unresolved-import,import-untyped]
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from ray import serve
 from rest_tools.utils import OpenIDAuth
 from wipac_dev_tools import from_environment_as_dataclass
 from wipac_dev_tools.logging_tools import LoggerLevel
@@ -40,27 +41,27 @@ ort.preload_dlls(directory="")
 class EnvConfig:
     """Environment variables."""
 
-    AUTH_AUDIENCE: str = "ray-serve"
-    AUTH_OPENID_URL: str = "https://keycloak.icecube.wisc.edu/auth/realms/IceCube"
+    auth_audience: str = "ray-serve"
+    auth_openid_url: str = "https://keycloak.icecube.wisc.edu/auth/realms/IceCube"
 
-    CI: bool = False  # github actions sets this to 'true'
-    LOG_LEVEL: LoggerLevel = "INFO"
+    ci: bool = False  # github actions sets this to 'true'
+    log_level: LoggerLevel = "INFO"
 
-    MODEL_NAME: str = "tglauch_classifier"
-    MODEL_VERSION: str = "3"
-    MODEL_REPO: str = "/cvmfs/icecube.opensciencegrid.org/users/briedel/ml/models"
+    model_name: str = "tglauch_classifier"
+    model_version: str = "3"
+    model_repo: str = "/cvmfs/icecube.opensciencegrid.org/users/briedel/ml/models"
 
-    MAX_BATCH_SIZE: int = 250
-    BATCH_WAIT_TIMEOUT_S: float = 0.001
+    max_batch_size: int = 250
+    batch_wait_timeout_s: float = 0.001
 
-    TRT_MAX_WORKSPACE_SIZE: int = 12_884_901_888
+    trt_max_workspace_size: int = 12_884_901_888
 
-    EXECUTION_PROVIDER: str = "TensorrtExecutionProvider"
+    execution_provider: str = "TensorrtExecutionProvider"
 
 
 ENV = from_environment_as_dataclass(EnvConfig)
 LOGGER = logging.getLogger("ray")
-LOGGER.setLevel(ENV.LOG_LEVEL)
+LOGGER.setLevel(ENV.log_level)
 
 
 def _pkg_version(pkg: str) -> str:
@@ -74,9 +75,9 @@ def _pkg_version(pkg: str) -> str:
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-MODEL_NAME = ENV.MODEL_NAME
-MODEL_VERSION = ENV.MODEL_VERSION
-MODEL_REPO = ENV.MODEL_REPO
+MODEL_REPO = ENV.model_repo
+MODEL_NAME = ENV.model_name
+MODEL_VERSION = ENV.model_version
 MODEL_PATH = os.path.join(
     MODEL_REPO,
     MODEL_NAME,
@@ -87,10 +88,10 @@ MODEL_PATH = os.path.join(
 # Matches config.pbtxt trt_profile_max_shapes batch dimension.
 # Triton's max_batch_size (4000) is a queue-level limit; per-inference TRT
 # max is 250, so that's the right cap for Ray Serve batching.
-BATCH_MAX_SIZE = ENV.MAX_BATCH_SIZE
+BATCH_MAX_SIZE = ENV.max_batch_size
 
 # Matches config.pbtxt dynamic_batching.max_queue_delay_microseconds = 1000.
-BATCH_WAIT_TIMEOUT_S = ENV.BATCH_WAIT_TIMEOUT_S
+BATCH_WAIT_TIMEOUT_S = ENV.batch_wait_timeout_s
 
 # TensorRT provider options, mirroring config.pbtxt gpu_execution_accelerator.
 # Profile shapes match the actual ONNX model: Input-Branch1 is rank-5
@@ -98,7 +99,7 @@ BATCH_WAIT_TIMEOUT_S = ENV.BATCH_WAIT_TIMEOUT_S
 # trt_engine_cache_path must be rebuilt after editing these dims.
 _TRT_PROVIDER_OPTIONS: dict[str, Any] = {
     "trt_fp16_enable": True,
-    "trt_max_workspace_size": ENV.TRT_MAX_WORKSPACE_SIZE,
+    "trt_max_workspace_size": ENV.trt_max_workspace_size,
     "trt_engine_cache_enable": True,
     "trt_engine_cache_path": "/tmp/trt_cache",
     "trt_timing_cache_enable": True,
@@ -112,8 +113,8 @@ _TRT_PROVIDER_OPTIONS: dict[str, Any] = {
 # Set our execution provider for ONNX model; default to CUDA, or TensorRT if provided from ENV with fallbacks to CUDA and CPU
 cudaExecutionProvider = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
-if ENV.EXECUTION_PROVIDER == "TensorrtExecutionProvider":
-    import tensorrt
+if ENV.execution_provider == "TensorrtExecutionProvider":
+    import tensorrt  # ruff: ignore[F401]
 
     EXECUTION_PROVIDER = [
         ("TensorrtExecutionProvider", _TRT_PROVIDER_OPTIONS)
@@ -165,7 +166,7 @@ def _ort_shape_to_v2(shape: list) -> list[int]:
 
 
 # V2 metadata response. Tensor specs (name/shape/datatype) are populated at
-# startup from the ONNX session — see TglauchClassifier.__init__. The values
+# startup from the ONNX session — see GenericOrtServe.__init__. The values
 # below are placeholders that get overwritten before any request is served.
 _MODEL_METADATA: dict[str, Any] = {
     "name": MODEL_NAME,
@@ -176,11 +177,10 @@ _MODEL_METADATA: dict[str, Any] = {
     "max_batch_size": BATCH_MAX_SIZE,
 }
 
+
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
-
-
 class Auth:
     """
     A wrapper around OpenIDAuth that validates the Keycloak Bearer token.
@@ -192,8 +192,8 @@ class Auth:
 
     _openid_auth: OpenIDAuth | None = (
         None
-        if ENV.CI  # no auth checks in CI
-        else OpenIDAuth(ENV.AUTH_OPENID_URL, audience=ENV.AUTH_AUDIENCE)
+        if ENV.ci  # no auth checks in CI
+        else OpenIDAuth(ENV.auth_openid_url, audience=ENV.auth_audience)
     )
     _bearer = HTTPBearer(auto_error=False)
 
@@ -224,7 +224,7 @@ class Auth:
         # Keycloak client roles live under resource_access.<client_id>.roles.
         roles: list[str] = (
             claims.get("resource_access", {})
-            .get(ENV.AUTH_AUDIENCE, {})
+            .get(ENV.auth_audience, {})
             .get("roles", [])
         )
 
@@ -250,8 +250,8 @@ app = FastAPI()
 
 @serve.deployment()
 @serve.ingress(app)
-class TglauchClassifier:
-    """Ray Serve deployment serving tglauch_classifier via ONNX Runtime + TRT."""
+class GenericServe:
+    """Ray Serve deployment serving a model via ONNX Runtime + TRT."""
 
     def __init__(self):
         providers = EXECUTION_PROVIDER
@@ -290,9 +290,9 @@ class TglauchClassifier:
         _MODEL_METADATA["outputs"][0]["datatype"] = self._output_datatype
 
         LOGGER.info(
-            f"TglauchClassifier ready  "
+            f"GenericOrtServe ready  "
             f"model={MODEL_NAME!r} version={MODEL_VERSION}  "
-            f"auth={'disabled (CI)' if ENV.CI else 'enabled'}"
+            f"auth={'disabled (CI)' if ENV.ci else 'enabled'}"
         )
         # Update 'i3-ml-suite' below to match the actual deployed package name.
         LOGGER.info(
@@ -365,6 +365,44 @@ class TglauchClassifier:
     # -----------------------------------------------------------------------
     # Inference endpoints
     # -----------------------------------------------------------------------
+
+    @app.get(f"/v2/models/{MODEL_NAME}/warm")
+    @app.get(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}/warm")
+    async def warm(
+        self,
+        _claims: Annotated[dict, Depends(Auth.require_auth)],
+    ):
+        """Warm Exection Provider by running inference with zeroed tensor input array"""
+        dtype = _MODEL_METADATA["inputs"][0]["datatype"]
+        shape = _MODEL_METADATA["inputs"][0]["shape"]
+        input_array = np.zeros(shape=shape, dtype=dtype)
+
+        t0 = time.monotonic()
+        try:
+            result = await self._run_inference(input_array)
+        except Exception as exc:
+            LOGGER.error(f"infer failed id=prewarm, dtype={dtype} shape={shape}: {exc}")
+            raise
+
+        LOGGER.info(
+            f"infer "
+            f"in={shape}  out={list(result.shape)}  "
+            f"{(time.monotonic() - t0) * 1000:.1f}ms"
+        )
+
+        return {
+            "id": "prewarm",
+            "model_name": MODEL_NAME,
+            "model_version": MODEL_VERSION,
+            "outputs": [
+                {
+                    "name": self._output_name,
+                    "datatype": self._output_datatype,
+                    "shape": list(result.shape),
+                    "data": result.flatten().tolist(),
+                }
+            ],
+        }
 
     @app.post(f"/v2/models/{MODEL_NAME}/infer")
     @app.post(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}/infer")
@@ -471,47 +509,7 @@ class TglauchClassifier:
         # returns [batched_result] unchanged.
         sizes = [arr.shape[0] for arr in input_arrays]
         split_indices: list[int] = np.cumsum(sizes)[:-1].tolist()
-        return list(
-            np.split(batched_result, split_indices)  # ty: ignore[no-matching-overload]
-        )
+        return list(np.split(batched_result, split_indices))
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
-
-def _parse_args() -> argparse.Namespace:
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Ray Serve V2 server for tglauch_classifier"
-    )
-    parser.add_argument(
-        "--host",
-        default="0.0.0.0",
-        help="Host to bind to",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=8000,
-        help="Port to bind to",
-    )
-    return parser.parse_args()
-
-
-if __name__ == "__main__":
-    args = _parse_args()
-    ray.init()
-    serve.start(http_options={"host": args.host, "port": args.port})
-    # fmt: off
-    serve.run(TglauchClassifier.bind())  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
-    # fmt: on
-    # Block until SIGINT/SIGTERM. serve.run_until_interrupted() does not exist
-    # in current Ray releases; signal.pause() is the portable equivalent.
-    signal.pause()
-
-# Assign TglauchClassifier application to variable for ray serve exectution in kubernetes
-# else run directly
-if "KUBERNETES_SERVICE_HOST" in os.environ:
-    model = TglauchClassifier.bind()  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+# model = GenericServe.bind()  # type: ignore[attr-defined]
