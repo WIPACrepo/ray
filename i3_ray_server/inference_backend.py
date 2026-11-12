@@ -14,6 +14,24 @@ LOGGER = logging.getLogger("ray")
 
 @dc.dataclass
 class BackendConfig(BaseModel):
+    """BackendConfig: dataclass for initializing a InferenceBackend with args from a ServeConfig
+
+    Attributes:
+        runtime: str
+            Inference backend to use
+        model_repo: str
+            Base repository to look for a model (ex: /cvmfs/icecube.wisc.edu/...)
+        model_name: str
+            Model name
+        model_version: str
+            Model version
+        model_path: str | None = None
+            Can be a specific path, or leave none to automatically build from model_repo, model_name, model_version
+        options: dict[str, Any]
+            Dict containing runtime specific configuration for a InferenceBackend
+
+    """
+
     runtime: str
     model_repo: str
     model_name: str
