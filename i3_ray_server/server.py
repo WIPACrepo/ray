@@ -173,14 +173,16 @@ class GenericServe:
         LOGGER.info(f"model path: {self.backend.model_path}")
         LOGGER.info(
             f"ONNX tensors:  "
-            f"input_name={self.backend.model_metadata['input']['name']!r} shape={_MODEL_METADATA['inputs'][0]['shape']} "
-            f"dtype={_MODEL_METADATA['inputs'][0]['datatype']}  |  "
-            f"output={self._output_name!r} shape={_MODEL_METADATA['outputs'][0]['shape']} "
-            f"dtype={self._output_datatype}"
+            f"  input_name={self.backend.model_metadata['inputs']['name']!r}"
+            f"  input_shape={self.backend.model_metadata['inputs']['shape']} "
+            f"  input_dtype={self.backend.model_metadata['inputs']['datatype']}  |  "
+            f"  output_name={self.backend.model_metadata['outputs']['name']!r}"
+            f"  output_shape={self.backend.model_metadata['outputs']['shape']} "
+            f"  output_dtype={self.backend.model_metadata['outputs']['datatype']}"
         )
         LOGGER.info(
-            f"batching:  max_size={BATCH_MAX_SIZE}  "
-            f"wait_timeout={BATCH_WAIT_TIMEOUT_S}s"
+            f"batching:  max_size={self.backend.batch_max_size}  "
+            f"wait_timeout={self.backend.batch_wait_timeout_s}s"
         )
 
     def _build(self, config: BackendConfig):
@@ -312,8 +314,6 @@ class GenericServe:
         }
 
     @serve.batch(
-        max_batch_size=BATCH_MAX_SIZE,
-        batch_wait_timeout_s=BATCH_WAIT_TIMEOUT_S,
         batch_size_fn=lambda arrays: sum(len(a) for a in arrays),
     )
     async def _batch_inference(
@@ -328,12 +328,19 @@ class GenericServe:
         batched = np.concatenate(input_arrays, axis=0)
 
         LOGGER.debug(
-            f"_run_inference: batching {len(inputs)} request(s) → shape {batched.shape}"
+            f"_run_inference: batching {len(input_arrays)} request(s) → shape {batched.shape}"
         )
 
         results = await self.backend.infer(batched)
 
         return results
+
+    def reconfigure(self, user_config: dict):
+        """Set the max_batch_size and batch_wait_timeout_s via user_config if available"""
+        self._batch_inference.set_max_batch_size(user_config["max_batch_size"])  # pyright: ignore[reportAttributeAccessIssue]
+        self._batch_inference.set_batch_wait_timeout_s(
+            user_config["batch_wait_timeout_s"]
+        )  # pyright: ignore[reportAttributeAccessIssue]
 
 
 model = GenericServe.bind()  # type: ignore[attr-defined]

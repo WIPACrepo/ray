@@ -29,7 +29,6 @@ class BackendConfig(BaseModel):
             Can be a specific path, or leave none to automatically build from model_repo, model_name, model_version
         options: dict[str, Any]
             Dict containing runtime specific configuration for a InferenceBackend
-
     """
 
     runtime: str
@@ -129,6 +128,11 @@ class OnnxBackend(InferenceBackend):
 
     def load(self):
         import onnxruntime as ort
+
+        self.batch_max_size = self._config.options.get("batch_max_size", 1)
+        self.batch_wait_timeout_s = self._config.options.get(
+            "batch_wait_timeout_s", 0.01
+        )
 
         ort.preload_dlls(directory="")
 
@@ -253,8 +257,8 @@ class OnnxBackend(InferenceBackend):
             }
 
             if self._config.options["trt_provider_options"]:
-                trt_provider_options = (
-                    trt_provider_options | self._config.options["trt_provider_options"]
+                trt_provider_options = trt_provider_options | self._config.options.get(
+                    "trt_provider_options", {}
                 )
 
             idx = providers.index("TensorrtExecutionProvider")
