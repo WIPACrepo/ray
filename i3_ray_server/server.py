@@ -10,21 +10,18 @@ Triton config.pbtxt equivalents:
     - max_batch_size:    4000 (Triton total); TRT profile max is 250 per call,
                          so Ray Serve batching is capped at 250
     - dynamic_batching:  @serve.batch with batch_wait_timeout_s=0.001 (1ms)
-    - version_policy:    version 3 hardcoded as MODEL_VERSION below
+    - version_policy:    version 3 hardcoded as self.model_version below
 """
 
-import argparse
 import asyncio
 import dataclasses as dc
 import importlib.metadata
 import logging
 import os
-import signal
 import time
 from typing import Annotated, Any
 
 import numpy as np
-import onnxruntime as ort  # type: ignore[unresolved-import,import-untyped]
 from ray import serve  # type: ignore[unresolved-import,import-untyped]
 from ray.serve.config import BackpressureConfig  # type: ignore[unresolved-import,import-untyped]
 
@@ -34,11 +31,17 @@ from rest_tools.utils import OpenIDAuth
 from wipac_dev_tools import from_environment_as_dataclass
 from wipac_dev_tools.logging_tools import LoggerLevel
 
-ort.preload_dlls(directory="")
+from inference_backend import *
+
+
+class PredictResponse(BaseModel):
+    model_name: str
+    model_version: str
+    outputs: dict[str, list]
 
 
 @dc.dataclass(frozen=True)
-class EnvConfig:
+class EnvConfig(BaseModel):
     """Environment variables."""
 
     auth_audience: str = "ray-serve"
@@ -46,17 +49,6 @@ class EnvConfig:
 
     ci: bool = False  # github actions sets this to 'true'
     log_level: LoggerLevel = "INFO"
-
-    model_name: str = "tglauch_classifier"
-    model_version: str = "3"
-    model_repo: str = "/cvmfs/icecube.opensciencegrid.org/users/briedel/ml/models"
-
-    max_batch_size: int = 250
-    batch_wait_timeout_s: float = 0.001
-
-    trt_max_workspace_size: int = 12_884_901_888
-
-    execution_provider: str = "TensorrtExecutionProvider"
 
 
 ENV = from_environment_as_dataclass(EnvConfig)
@@ -72,56 +64,6 @@ def _pkg_version(pkg: str) -> str:
         return "unknown"
 
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-MODEL_REPO = ENV.model_repo
-MODEL_NAME = ENV.model_name
-MODEL_VERSION = ENV.model_version
-MODEL_PATH = os.path.join(
-    MODEL_REPO,
-    MODEL_NAME,
-    MODEL_VERSION,
-    "model.onnx",
-)
-
-# Matches config.pbtxt trt_profile_max_shapes batch dimension.
-# Triton's max_batch_size (4000) is a queue-level limit; per-inference TRT
-# max is 250, so that's the right cap for Ray Serve batching.
-BATCH_MAX_SIZE = ENV.max_batch_size
-
-# Matches config.pbtxt dynamic_batching.max_queue_delay_microseconds = 1000.
-BATCH_WAIT_TIMEOUT_S = ENV.batch_wait_timeout_s
-
-# TensorRT provider options, mirroring config.pbtxt gpu_execution_accelerator.
-# Profile shapes match the actual ONNX model: Input-Branch1 is rank-5
-# (batch, 10, 10, 60, 16), not rank-4. The cached engine under
-# trt_engine_cache_path must be rebuilt after editing these dims.
-_TRT_PROVIDER_OPTIONS: dict[str, Any] = {
-    "trt_fp16_enable": True,
-    "trt_max_workspace_size": ENV.trt_max_workspace_size,
-    "trt_engine_cache_enable": True,
-    "trt_engine_cache_path": "/tmp/trt_cache",
-    "trt_timing_cache_enable": True,
-    "trt_context_memory_sharing_enable": True,
-    # Profile shapes match config.pbtxt trt_profile_*_shapes.
-    "trt_profile_min_shapes": "Input-Branch1:1x10x10x60x16",
-    "trt_profile_max_shapes": "Input-Branch1:250x10x10x60x16",
-    "trt_profile_opt_shapes": "Input-Branch1:100x10x10x60x16",
-}
-
-# Set our execution provider for ONNX model; default to CUDA, or TensorRT if provided from ENV with fallbacks to CUDA and CPU
-cudaExecutionProvider = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-
-if ENV.execution_provider == "TensorrtExecutionProvider":
-    import tensorrt  # ruff: ignore[F401]
-
-    EXECUTION_PROVIDER = [
-        ("TensorrtExecutionProvider", _TRT_PROVIDER_OPTIONS)
-    ] + cudaExecutionProvider
-else:
-    EXECUTION_PROVIDER = cudaExecutionProvider
-
 # Map from V2 datatype strings to numpy dtypes — mirrors the client's _V2_DTYPE_TO_NUMPY.
 _V2_DTYPE_TO_NUMPY: dict[str, Any] = {
     "FP16": np.float16,
@@ -136,45 +78,6 @@ _V2_DTYPE_TO_NUMPY: dict[str, Any] = {
     "UINT32": np.uint32,
     "UINT64": np.uint64,
     "BOOL": np.bool_,
-}
-
-# Map from ONNX Runtime input/output type strings to V2 datatype strings.
-# ORT sometimes returns "tensor(float)" instead of "tensor(float32)"; both
-# map to "FP32" so either form resolves consistently.
-_ORT_TYPE_TO_V2: dict[str, str] = {
-    "tensor(float16)": "FP16",
-    "tensor(float)": "FP32",
-    "tensor(float32)": "FP32",
-    "tensor(float64)": "FP64",
-    "tensor(double)": "FP64",
-    "tensor(int8)": "INT8",
-    "tensor(int16)": "INT16",
-    "tensor(int32)": "INT32",
-    "tensor(int64)": "INT64",
-    "tensor(uint8)": "UINT8",
-    "tensor(uint16)": "UINT16",
-    "tensor(uint32)": "UINT32",
-    "tensor(uint64)": "UINT64",
-    "tensor(bool)": "BOOL",
-}
-
-
-def _ort_shape_to_v2(shape: list) -> list[int]:
-    """Convert an ORT shape (with str entries for dynamic dims) to a V2 shape (-1 for dynamic)."""
-    # ORT reports symbolic dims as strings (e.g. 'unk__4862'); V2 uses -1.
-    return [-1 if isinstance(s, str) else int(s) for s in shape]
-
-
-# V2 metadata response. Tensor specs (name/shape/datatype) are populated at
-# startup from the ONNX session — see GenericOrtServe.__init__. The values
-# below are placeholders that get overwritten before any request is served.
-_MODEL_METADATA: dict[str, Any] = {
-    "name": MODEL_NAME,
-    "versions": [MODEL_VERSION],
-    "platform": "onnxruntime_onnx",
-    "inputs": [{"name": "", "shape": [], "datatype": ""}],
-    "outputs": [{"name": "", "shape": [], "datatype": ""}],
-    "max_batch_size": BATCH_MAX_SIZE,
 }
 
 
@@ -253,58 +156,24 @@ app = FastAPI()
 class GenericServe:
     """Ray Serve deployment serving a model via ONNX Runtime + TRT."""
 
-    def __init__(self):
-        providers = EXECUTION_PROVIDER
-        sess_options = ort.SessionOptions()
-        # Matches config.pbtxt optimization.graph.level = 1.
-        sess_options.graph_optimization_level = (
-            ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
-        )
-        sess_options.enable_cpu_mem_arena = True
-        sess_options.enable_mem_pattern = True
-        sess_options.enable_profiling = True
-        # Parallelism is handled by Ray Serve replicas (4 × 1 GPU each),
-        # not by threading within a session. Keeping both thread counts at 1
-        # avoids TRT context thread-safety issues.
-        sess_options.inter_op_num_threads = 1
-        sess_options.intra_op_num_threads = 1
-        self._session = ort.InferenceSession(
-            MODEL_PATH, sess_options=sess_options, providers=providers
-        )
-
-        # Resolve all tensor metadata from the actual ONNX model at startup so
-        # the V2 metadata endpoint never drifts from what the model accepts /
-        # returns. Without this, hardcoded shapes/dtypes in _MODEL_METADATA can
-        # silently lie about the model (e.g. wrong rank, wrong output dtype).
-        ort_in = self._session.get_inputs()[0]
-        ort_out = self._session.get_outputs()[0]
-        self._input_name: str = ort_in.name
-        self._output_name: str = ort_out.name
-        self._output_datatype: str = _ORT_TYPE_TO_V2[ort_out.type]
-
-        _MODEL_METADATA["inputs"][0]["name"] = self._input_name
-        _MODEL_METADATA["inputs"][0]["shape"] = _ort_shape_to_v2(ort_in.shape)
-        _MODEL_METADATA["inputs"][0]["datatype"] = _ORT_TYPE_TO_V2[ort_in.type]
-        _MODEL_METADATA["outputs"][0]["name"] = self._output_name
-        _MODEL_METADATA["outputs"][0]["shape"] = _ort_shape_to_v2(ort_out.shape)
-        _MODEL_METADATA["outputs"][0]["datatype"] = self._output_datatype
+    def __init__(self, config: dict):
+        self._build(BackendConfig(**config))
 
         LOGGER.info(
-            f"GenericOrtServe ready  "
-            f"model={MODEL_NAME!r} version={MODEL_VERSION}  "
+            f"Serve deployment ready  "
+            f"model={self.backend.model_name!r} version={self.backend.model_version}  "
             f"auth={'disabled (CI)' if ENV.ci else 'enabled'}"
         )
-        # Update 'i3-ml-suite' below to match the actual deployed package name.
         LOGGER.info(
             f"versions:  "
             f"server={_pkg_version('i3-ml-suite')}  "
             f"onnxruntime={_pkg_version('onnxruntime')}  "
             f"ray={_pkg_version('ray')}"
         )
-        LOGGER.info(f"model path: {MODEL_PATH}")
+        LOGGER.info(f"model path: {self.backend.model_path}")
         LOGGER.info(
             f"ONNX tensors:  "
-            f"input={self._input_name!r} shape={_MODEL_METADATA['inputs'][0]['shape']} "
+            f"input_name={self.backend.model_metadata['input']['name']!r} shape={_MODEL_METADATA['inputs'][0]['shape']} "
             f"dtype={_MODEL_METADATA['inputs'][0]['datatype']}  |  "
             f"output={self._output_name!r} shape={_MODEL_METADATA['outputs'][0]['shape']} "
             f"dtype={self._output_datatype}"
@@ -314,44 +183,31 @@ class GenericServe:
             f"wait_timeout={BATCH_WAIT_TIMEOUT_S}s"
         )
 
+    def _build(self, config: BackendConfig):
+        backend = create_backend(config)
+        backend.load()
+
+        self.config, self.backend = config, backend
+
     # -----------------------------------------------------------------------
     # Health endpoints
     # -----------------------------------------------------------------------
-
-    @app.get("/v2/health/live")
-    async def health_live(
-        self,
-        # NOTE: no auth because this endpoint is public to readiness probes
-    ):
-        """Liveness probe — server process is running."""
-        LOGGER.debug("health/live")
-        return {}
-
-    @app.get("/v2/health/ready")
-    async def health_ready(
-        self,
-        # NOTE: no auth because this endpoint is public to readiness probes
-    ):
-        """Readiness probe — server is ready to accept requests."""
-        LOGGER.debug("health/ready")
-        return {}
-
-    @app.get(f"/v2/models/{MODEL_NAME}/ready")
-    @app.get(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}/ready")
+    @app.get("/ready")
     async def model_ready(
         self,
         _claims: Annotated[dict, Depends(Auth.require_auth)],
     ):
         """Model readiness probe."""
-        LOGGER.debug(f"model_ready  model={MODEL_NAME!r} version={MODEL_VERSION}")
+        LOGGER.debug(
+            f"model_ready  model={self.backend.model_name!r} version={self.backend.model_version}"
+        )
         return {}
 
     # -----------------------------------------------------------------------
     # Metadata endpoints
     # -----------------------------------------------------------------------
 
-    @app.get(f"/v2/models/{MODEL_NAME}")
-    @app.get(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}")
+    @app.get("/")
     async def model_metadata(
         self,
         _claims: Annotated[dict, Depends(Auth.require_auth)],
@@ -359,53 +215,42 @@ class GenericServe:
         """Return V2 model metadata including input/output tensor specs."""
         # _MODEL_METADATA is fully populated in __init__ from the ONNX session,
         # so it can be returned directly.
-        LOGGER.debug(f"model_metadata  model={MODEL_NAME!r} version={MODEL_VERSION}")
-        return _MODEL_METADATA
+        LOGGER.debug(
+            f"model_metadata  model={self.backend.model_name!r} version={self.backend.model_version}"
+        )
+        return self.backend.model_metadata
 
     # -----------------------------------------------------------------------
     # Inference endpoints
     # -----------------------------------------------------------------------
 
-    @app.get(f"/v2/models/{MODEL_NAME}/warm")
-    @app.get(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}/warm")
+    @app.get("/warm")
     async def warm(
         self,
         _claims: Annotated[dict, Depends(Auth.require_auth)],
     ):
         """Warm Exection Provider by running inference with zeroed tensor input array"""
-        dtype = _MODEL_METADATA["inputs"][0]["datatype"]
-        shape = _MODEL_METADATA["inputs"][0]["shape"]
-        input_array = np.zeros(shape=shape, dtype=dtype)
-
-        t0 = time.monotonic()
         try:
-            result = await self._run_inference(input_array)
+            result = await self.backend.warm()
         except Exception as exc:
-            LOGGER.error(f"infer failed id=prewarm, dtype={dtype} shape={shape}: {exc}")
+            LOGGER.error(f"warm failed {exc}")
             raise
 
-        LOGGER.info(
-            f"infer "
-            f"in={shape}  out={list(result.shape)}  "
-            f"{(time.monotonic() - t0) * 1000:.1f}ms"
-        )
-
         return {
-            "id": "prewarm",
-            "model_name": MODEL_NAME,
-            "model_version": MODEL_VERSION,
+            "id": "warm",
+            "model_name": self.backend.model_metadata["name"],
+            "model_version": self.backend.model_metadata["version"],
             "outputs": [
                 {
-                    "name": self._output_name,
-                    "datatype": self._output_datatype,
-                    "shape": list(result.shape),
+                    "name": self.backend.model_metadata["outputs"]["name"],
+                    "datatype": self.backend.model_metadata["outputs"]["datatype"],
+                    "shape": self.backend.model_metadata["outputs"]["shape"],
                     "data": result.flatten().tolist(),
                 }
             ],
         }
 
-    @app.post(f"/v2/models/{MODEL_NAME}/infer")
-    @app.post(f"/v2/models/{MODEL_NAME}/versions/{MODEL_VERSION}/infer")
+    @app.post("/infer")
     async def infer(
         self,
         http_request: Request,
@@ -439,7 +284,7 @@ class GenericServe:
 
         t0 = time.monotonic()
         try:
-            result = await self._run_inference(input_array)
+            result = await self._batch_inference(input_array)
         except Exception as exc:
             LOGGER.error(
                 f"infer failed  id={request_id[:8]!r} shape={input_shape}: {exc}"
@@ -454,14 +299,12 @@ class GenericServe:
 
         return {
             "id": request_id,
-            "model_name": MODEL_NAME,
-            "model_version": MODEL_VERSION,
+            "model_name": self.backend.model_name,
+            "model_version": self.backend.model_version,
             "outputs": [
                 {
-                    "name": self._output_name,
-                    # Use the dtype resolved from the model session, not a
-                    # hardcoded string — otherwise the client downcasts.
-                    "datatype": self._output_datatype,
+                    "name": self.backend.model_metadata["outputs"]["name"],
+                    "datatype": self.backend.model_metadata["outputs"]["name"],
                     "shape": list(result.shape),
                     "data": result.flatten().tolist(),
                 }
@@ -473,7 +316,9 @@ class GenericServe:
         batch_wait_timeout_s=BATCH_WAIT_TIMEOUT_S,
         batch_size_fn=lambda arrays: sum(len(a) for a in arrays),
     )
-    async def _run_inference(self, input_arrays: list[np.ndarray]) -> list[np.ndarray]:
+    async def _batch_inference(
+        self, input_arrays: list[np.ndarray]
+    ) -> list[np.ndarray]:
         """Run batched ONNX inference.
 
         Ray Serve collects individual infer() calls into a batch here,
@@ -483,33 +328,12 @@ class GenericServe:
         batched = np.concatenate(input_arrays, axis=0)
 
         LOGGER.debug(
-            f"_run_inference: batching {len(input_arrays)} request(s) → shape {batched.shape}"
+            f"_run_inference: batching {len(inputs)} request(s) → shape {batched.shape}"
         )
 
-        # session.run is synchronous and GPU-bound; offload it to a thread
-        # executor so the Ray Serve event loop is not blocked during inference.
-        loop = asyncio.get_running_loop()
-        t0 = time.monotonic()
-        outputs = await loop.run_in_executor(
-            None,
-            lambda: self._session.run(
-                [self._output_name],
-                {self._input_name: batched},
-            ),
-        )
-        batched_result = np.asarray(outputs[0])
-        LOGGER.debug(
-            f"_run_inference: complete  "
-            f"out_shape={batched_result.shape}  "
-            f"{(time.monotonic() - t0) * 1000:.1f}ms"
-        )
+        results = await self.backend.infer(batched)
 
-        # Split the batched output back into per-request arrays.
-        # np.split with an empty index list (single request case) correctly
-        # returns [batched_result] unchanged.
-        sizes = [arr.shape[0] for arr in input_arrays]
-        split_indices: list[int] = np.cumsum(sizes)[:-1].tolist()
-        return list(np.split(batched_result, split_indices))
+        return results
 
 
-# model = GenericServe.bind()  # type: ignore[attr-defined]
+model = GenericServe.bind()  # type: ignore[attr-defined]

@@ -1,15 +1,15 @@
-import argparse
 import asyncio
 import dataclasses as dc
-import importlib.metadata
 import logging
 import os
-import signal
 import time
-from typing import Annotated, Any, ClassVar
+from typing import Any, ClassVar
 from abc import ABC, abstractmethod
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 import numpy as np
+import numpy.typing as npt
+
+LOGGER = logging.getLogger("ray")
 
 
 @dc.dataclass
@@ -40,20 +40,30 @@ class InferenceBackend(ABC):
     }
 
     def __init__(self, config: BackendConfig):
-        self.config = config
+        self._config = config
+        self.model_name = config.model_name
+        self.model_version = config.model_version
+        self.model_path = self._get_model_path()
+        self.model_metadata: dict[str, Any] = {
+            "name": self._config.model_name,
+            "versions": [self._config.model_version],
+            "platform": self._config.runtime,
+            "inputs": [{"name": "", "shape": [], "datatype": ""}],
+            "outputs": [{"name": "", "shape": [], "datatype": ""}],
+        }
 
-    def get_module_path(self) -> str:
-        return self.config.model_path or os.path.join(
-            self.config.model_repo, self.config.model_name, self.config.model_version
+    def _get_model_path(self) -> str:
+        return self._config.model_path or os.path.join(
+            self._config.model_repo, self._config.model_name, self._config.model_version
         )
 
     @abstractmethod
     def load(self) -> None: ...
 
     @abstractmethod
-    def infer(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]: ...
+    async def infer(self, inputs: list[npt.NDArray[Any]]) -> list[npt.NDArray[Any]]: ...
 
-    def warm(self) -> None: ...
+    async def warm(self) -> Any: ...
     def close(self) -> None: ...
 
 
@@ -61,6 +71,8 @@ _REGISTRY: dict[str, type[InferenceBackend]] = {}
 
 
 def register_backend(name: str):
+    """Class decorator for registering as an extension of InferenceBackend"""
+
     def deco(cls):
         _REGISTRY[name] = cls
         return cls
@@ -119,33 +131,95 @@ class OnnxBackend(InferenceBackend):
         sess_options.intra_op_num_threads = 1
 
         self._session = ort.InferenceSession(
-            self.get_module_path(), sess_options=sess_options, providers=providers
+            self._get_model_path(), sess_options=sess_options, providers=providers
         )
 
         # Resolve all tensor metadata from the actual ONNX model at startup so
         # the V2 metadata endpoint never drifts from what the model accepts /
-        # returns. Without this, hardcoded shapes/dtypes in _MODEL_METADATA can
+        # returns. Without this, hardcoded shapes/dtypes in model_metadata can
         # silently lie about the model (e.g. wrong rank, wrong output dtype).
         ort_in = self._session.get_inputs()[0]
         ort_out = self._session.get_outputs()[0]
-        self._input_name: str = ort_in.name
-        self._output_name: str = ort_out.name
-        self._output_datatype: str = _ORT_TYPE_TO_V2[ort_out.type]
+        self._input_name = ort_in.name
+        self._output_name = ort_out.name
 
-        _MODEL_METADATA["inputs"][0]["name"] = self._input_name
-        _MODEL_METADATA["inputs"][0]["shape"] = _ort_shape_to_v2(ort_in.shape)
-        _MODEL_METADATA["inputs"][0]["datatype"] = _ORT_TYPE_TO_V2[ort_in.type]
-        _MODEL_METADATA["outputs"][0]["name"] = self._output_name
-        _MODEL_METADATA["outputs"][0]["shape"] = _ort_shape_to_v2(ort_out.shape)
-        _MODEL_METADATA["outputs"][0]["datatype"] = self._output_datatype
+        self.model_metadata["inputs"]["name"] = self._input_name
+        self.model_metadata["inputs"]["shape"] = self._ort_shape_to_v2(ort_in.shape)
+        self.model_metadata["inputs"]["datatype"] = OnnxBackend._ORT_TYPE_TO_V2[
+            ort_in.type
+        ]
 
-    def _configure_providers(self):
-        providers: list = self.config.options["providers"] or [
+        self.model_metadata["outputs"]["name"] = self._output_name
+        self.model_metadata["outputs"]["shape"] = self._ort_shape_to_v2(ort_out.shape)
+        self.model_metadata["outputs"]["datatype"] = OnnxBackend._ORT_TYPE_TO_V2[
+            ort_out.type
+        ]
+
+    async def warm(self) -> list[npt.NDArray[Any]]:
+        """Warm Exection Provider by running inference with zeroed tensor input array"""
+        dtype: npt.DTypeLike = self.model_metadata["inputs"]["datatype"]
+        shape: list[int] = self.model_metadata["inputs"]["shape"]
+        input_array = np.zeros(shape=shape, dtype=dtype)
+
+        t0 = time.monotonic()
+        try:
+            result = await self.infer(input_array)
+        except Exception as exc:
+            LOGGER.error(f"infer failed id=prewarm, dtype={dtype} shape={shape}: {exc}")
+            raise
+
+        LOGGER.info(
+            f"infer "
+            f"in={shape}  out={list(result.shape)}  "
+            f"{(time.monotonic() - t0) * 1000:.1f}ms"
+        )
+
+        return result
+
+    async def infer(self, inputs: list[npt.NDArray[Any]]) -> list[npt.NDArray[Any]]:
+        """Run batched ONNX inference.
+
+        Ray Serve collects individual infer() calls into a batch here,
+        replacing Triton's dynamic_batching behavior.
+        """
+        # session.run is synchronous and GPU-bound; offload it to a thread
+        # executor so the Ray Serve event loop is not blocked during inference.
+        loop = asyncio.get_running_loop()
+        t0 = time.monotonic()
+        outputs = await loop.run_in_executor(
+            None,
+            lambda: self._session.run(
+                [self._output_name],
+                {self._input_name: inputs},
+            ),
+        )
+        result = np.asarray(outputs[0])
+        LOGGER.debug(
+            f"_run_inference: complete  "
+            f"out_shape={result.shape}  "
+            f"{(time.monotonic() - t0) * 1000:.1f}ms"
+        )
+
+        # Split the batched output back into per-request arrays.
+        # np.split with an empty index list (single request case) correctly
+        # returns [batched_result] unchanged.
+        sizes = [arr.shape[0] for arr in inputs]
+        split_indices: list[int] = np.cumsum(sizes)[:-1].tolist()
+        return list(np.split(result, split_indices))
+
+    def _ort_shape_to_v2(self, shape: list) -> list[int]:
+        """Convert an ORT shape (with str entries for dynamic dims) to a V2 shape (-1 for dynamic)."""
+        # ORT reports symbolic dims as strings (e.g. 'unk__4862'); V2 uses -1.
+        return [-1 if isinstance(s, str) else int(s) for s in shape]
+
+    def _configure_providers(self) -> list[str | tuple]:
+        """Helper method for creating providers array for InferenceSession. Outputs list"""
+        providers: list = self._config.options["providers"] or [
             "CUDAExecutionProvider",
             "CPUExecutionProvider",
         ]
 
-        if "TensorrtExecutionProvider" in self.config.options["providers"]:
+        if "TensorrtExecutionProvider" in self._config.options["providers"]:
             import tensorrt  # ruff: ignore[F401]
 
             trt_provider_options: dict[str, Any] = {
@@ -160,9 +234,9 @@ class OnnxBackend(InferenceBackend):
                 "trt_profile_opt_shapes": "Input-Branch1:100x10x10x60x16",
             }
 
-            if self.config.options["trt_provider_options"]:
+            if self._config.options["trt_provider_options"]:
                 trt_provider_options = (
-                    trt_provider_options | self.config.options["trt_provider_options"]
+                    trt_provider_options | self._config.options["trt_provider_options"]
                 )
 
             idx = providers.index("TensorrtExecutionProvider")
