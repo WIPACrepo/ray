@@ -3,17 +3,18 @@ import dataclasses as dc
 import logging
 import os
 import time
-from typing import Any, ClassVar
 from abc import ABC, abstractmethod
-from pydantic import BaseModel
+from typing import Any, ClassVar
+
 import numpy as np
 import numpy.typing as npt
+# from pydantic import BaseModel
 
 LOGGER = logging.getLogger("ray")
 
 
 @dc.dataclass
-class BackendConfig(BaseModel):
+class BackendConfig:
     """BackendConfig: dataclass for initializing a InferenceBackend with args from a ServeConfig
 
     Attributes:
@@ -40,7 +41,7 @@ class BackendConfig(BaseModel):
 
 
 class InferenceBackend(ABC):
-    # Map from V2 datatype strings to numpy dtypes — mirrors the client's _V2_DTYPE_TO_NUMPY.
+    # Map from Kserve V2 datatype strings to numpy dtypes — mirrors the client's _V2_DTYPE_TO_NUMPY.
     _V2_DTYPE_TO_NUMPY: ClassVar[dict[str, Any]] = {
         "FP16": np.float16,
         "FP32": np.float32,
@@ -71,8 +72,14 @@ class InferenceBackend(ABC):
 
     def _get_model_path(self) -> str:
         return self._config.model_path or os.path.join(
-            self._config.model_repo, self._config.model_name, self._config.model_version
+            self._config.model_repo,
+            self._config.model_name,
+            self._config.model_version,
+            "model.onnx",
         )
+
+    def options_get(self, key: str, default: Any = None) -> Any | None:
+        return self._config.options.get("key", default)
 
     @abstractmethod
     def load(self) -> None: ...
@@ -80,7 +87,9 @@ class InferenceBackend(ABC):
     @abstractmethod
     async def infer(self, inputs: list[npt.NDArray[Any]]) -> list[npt.NDArray[Any]]: ...
 
+    @abstractmethod
     async def warm(self) -> Any: ...
+
     def close(self) -> None: ...
 
 
@@ -104,7 +113,7 @@ def create_backend(config: BackendConfig) -> InferenceBackend:
         raise ValueError(f"Unknown runtime {config.runtime!r}; have {list(_REGISTRY)}")
 
 
-@register_backend("onnx")
+@register_backend("onnx_onnxv1")
 class OnnxBackend(InferenceBackend):
     # Map from ONNX Runtime input/output type strings to V2 datatype strings.
     # ORT sometimes returns "tensor(float)" instead of "tensor(float32)"; both
@@ -129,11 +138,6 @@ class OnnxBackend(InferenceBackend):
     def load(self):
         import onnxruntime as ort
 
-        self.batch_max_size = self._config.options.get("batch_max_size", 1)
-        self.batch_wait_timeout_s = self._config.options.get(
-            "batch_wait_timeout_s", 0.01
-        )
-
         ort.preload_dlls(directory="")
 
         sess_options = ort.SessionOptions()
@@ -153,7 +157,9 @@ class OnnxBackend(InferenceBackend):
         sess_options.intra_op_num_threads = 1
 
         self._session = ort.InferenceSession(
-            self._get_model_path(), sess_options=sess_options, providers=providers
+            self._get_model_path(),
+            sess_options=sess_options,
+            providers=providers,
         )
 
         # Resolve all tensor metadata from the actual ONNX model at startup so
@@ -179,20 +185,24 @@ class OnnxBackend(InferenceBackend):
 
     async def warm(self) -> list[npt.NDArray[Any]]:
         """Warm Exection Provider by running inference with zeroed tensor input array"""
-        dtype: npt.DTypeLike = self.model_metadata["inputs"]["datatype"]
-        shape: list[int] = self.model_metadata["inputs"]["shape"]
-        input_array = np.zeros(shape=shape, dtype=dtype)
+        # Convert Onnx Dtype to Numpy; Set shape dynamic size to 1
+        dtype: npt.DTypeLike = InferenceBackend._V2_DTYPE_TO_NUMPY[
+            self.model_metadata["inputs"]["datatype"]
+        ]
+        shape = self.model_metadata["inputs"]["shape"]
+        shape[0] = 1
+        input_array = np.zeros_like(shape, dtype=dtype)
 
         t0 = time.monotonic()
         try:
-            result = await self.infer(input_array)
+            result = await self.infer([input_array])
         except Exception as exc:
             LOGGER.error(f"infer failed id=prewarm, dtype={dtype} shape={shape}: {exc}")
             raise
 
         LOGGER.info(
             f"infer "
-            f"in={shape}  out={list(result.shape)}  "
+            f"in={shape}  out={list(result[0].shape)}  "
             f"{(time.monotonic() - t0) * 1000:.1f}ms"
         )
 

@@ -22,11 +22,11 @@ import time
 from typing import Annotated, Any
 
 import numpy as np
-from ray import serve  # type: ignore[unresolved-import,import-untyped]
-from ray.serve.config import BackpressureConfig  # type: ignore[unresolved-import,import-untyped]
-
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel
+from ray import serve  # type: ignore[unresolved-import,import-untyped]
+from ray.serve.config import BackpressureConfig  # type: ignore[unresolved-import,import-untyped]
 from rest_tools.utils import OpenIDAuth
 from wipac_dev_tools import from_environment_as_dataclass
 from wipac_dev_tools.logging_tools import LoggerLevel
@@ -34,26 +34,20 @@ from wipac_dev_tools.logging_tools import LoggerLevel
 from inference_backend import *
 
 
-class PredictResponse(BaseModel):
-    model_name: str
-    model_version: str
-    outputs: dict[str, list]
-
-
 @dc.dataclass(frozen=True)
-class EnvConfig(BaseModel):
+class EnvConfig:
     """Environment variables."""
 
-    auth_audience: str = "ray-serve"
-    auth_openid_url: str = "https://keycloak.icecube.wisc.edu/auth/realms/IceCube"
+    AUTH_AUDIENCE: str = "ray-serve"
+    AUTH_OPENID_URL: str = "https://keycloak.icecube.wisc.edu/auth/realms/IceCube"
 
-    ci: bool = False  # github actions sets this to 'true'
-    log_level: LoggerLevel = "INFO"
+    CI: bool = False  # github actions sets this to 'true'
+    LOG_LEVEL: LoggerLevel = "INFO"
 
 
 ENV = from_environment_as_dataclass(EnvConfig)
 LOGGER = logging.getLogger("ray")
-LOGGER.setLevel(ENV.log_level)
+LOGGER.setLevel(ENV.LOG_LEVEL)
 
 
 def _pkg_version(pkg: str) -> str:
@@ -62,23 +56,6 @@ def _pkg_version(pkg: str) -> str:
         return importlib.metadata.version(pkg)
     except importlib.metadata.PackageNotFoundError:
         return "unknown"
-
-
-# Map from V2 datatype strings to numpy dtypes — mirrors the client's _V2_DTYPE_TO_NUMPY.
-_V2_DTYPE_TO_NUMPY: dict[str, Any] = {
-    "FP16": np.float16,
-    "FP32": np.float32,
-    "FP64": np.float64,
-    "INT8": np.int8,
-    "INT16": np.int16,
-    "INT32": np.int32,
-    "INT64": np.int64,
-    "UINT8": np.uint8,
-    "UINT16": np.uint16,
-    "UINT32": np.uint32,
-    "UINT64": np.uint64,
-    "BOOL": np.bool_,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -95,8 +72,8 @@ class Auth:
 
     _openid_auth: OpenIDAuth | None = (
         None
-        if ENV.ci  # no auth checks in CI
-        else OpenIDAuth(ENV.auth_openid_url, audience=ENV.auth_audience)
+        if ENV.CI  # no auth checks in CI
+        else OpenIDAuth(ENV.AUTH_OPENID_URL, audience=ENV.AUTH_AUDIENCE)
     )
     _bearer = HTTPBearer(auto_error=False)
 
@@ -127,7 +104,7 @@ class Auth:
         # Keycloak client roles live under resource_access.<client_id>.roles.
         roles: list[str] = (
             claims.get("resource_access", {})
-            .get(ENV.auth_audience, {})
+            .get(ENV.AUTH_AUDIENCE, {})
             .get("roles", [])
         )
 
@@ -154,7 +131,7 @@ app = FastAPI()
 @serve.deployment()
 @serve.ingress(app)
 class GenericServe:
-    """Ray Serve deployment serving a model via ONNX Runtime + TRT."""
+    """Ray Serve deployment serving an InferenceBackend"""
 
     def __init__(self, config: dict):
         self._build(BackendConfig(**config))
@@ -162,7 +139,7 @@ class GenericServe:
         LOGGER.info(
             f"Serve deployment ready  "
             f"model={self.backend.model_name!r} version={self.backend.model_version}  "
-            f"auth={'disabled (CI)' if ENV.ci else 'enabled'}"
+            f"auth={'disabled (CI)' if ENV.CI else 'enabled'}"
         )
         LOGGER.info(
             f"versions:  "
@@ -181,8 +158,8 @@ class GenericServe:
             f"  output_dtype={self.backend.model_metadata['outputs']['datatype']}"
         )
         LOGGER.info(
-            f"batching:  max_size={self.backend.batch_max_size}  "
-            f"wait_timeout={self.backend.batch_wait_timeout_s}s"
+            f"batching:  max_size={self.backend.options_get('batch_max_size')}  "
+            f"wait_timeout={self.backend.options_get('batch_wait_timeout_s')}s"
         )
 
     def _build(self, config: BackendConfig):
@@ -281,7 +258,9 @@ class GenericServe:
         input_shape = tensor.get("shape", [])
         LOGGER.debug(f"infer request  id={request_id[:8]!r} shape={input_shape}")
 
-        dtype = _V2_DTYPE_TO_NUMPY.get(tensor.get("datatype", "FP16"), np.float16)
+        dtype = InferenceBackend._V2_DTYPE_TO_NUMPY.get(
+            tensor.get("datatype", "FP16"), np.float16
+        )
         input_array = np.array(tensor["data"], dtype=dtype).reshape(tensor["shape"])
 
         t0 = time.monotonic()
@@ -319,10 +298,8 @@ class GenericServe:
     async def _batch_inference(
         self, input_arrays: list[np.ndarray]
     ) -> list[np.ndarray]:
-        """Run batched ONNX inference.
-
-        Ray Serve collects individual infer() calls into a batch here,
-        replacing Triton's dynamic_batching behavior.
+        """Ray Serve collects individual infer() calls into a batch here
+        reconfigure is ran to set appropriate batch size and timeouts on infer from user_config in ServeConfig
         """
         # Stack individual requests into a single batched array.
         batched = np.concatenate(input_arrays, axis=0)
@@ -337,10 +314,15 @@ class GenericServe:
 
     def reconfigure(self, user_config: dict):
         """Set the max_batch_size and batch_wait_timeout_s via user_config if available"""
-        self._batch_inference.set_max_batch_size(user_config["max_batch_size"])  # pyright: ignore[reportAttributeAccessIssue]
-        self._batch_inference.set_batch_wait_timeout_s(
-            user_config["batch_wait_timeout_s"]
-        )  # pyright: ignore[reportAttributeAccessIssue]
+        max_batch_size = user_config.get("max_batch_size", 1)
+        batch_wait_timeout_s = user_config.get("batch_wait_timeout_s", 0.001)
+
+        self._batch_inference.set_max_batch_size(max_batch_size)  # pyright: ignore[reportAttributeAccessIssue]
+        self._batch_inference.set_batch_wait_timeout_s(batch_wait_timeout_s)  # pyright: ignore[reportAttributeAccessIssue]
 
 
-model = GenericServe.bind()  # type: ignore[attr-defined]
+# model = GenericServe.bind(args)  # type: ignore[attr-defined]
+def build(args: dict):
+    # Validate at deploy time so bad config fails here, not in the replica
+    # BackendConfig(**args)
+    return GenericServe.bind(args)
