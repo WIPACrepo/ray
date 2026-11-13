@@ -27,7 +27,7 @@ class BackendConfig:
         model_version: str
             Model version
         model_path: str | None = None
-            Can be a specific path, or leave none to automatically build from model_repo, model_name, model_version
+            Can be a specific path, or leave None to automatically build from model_repo, model_name, model_version
         options: dict[str, Any]
             Dict containing runtime specific configuration for a InferenceBackend
     """
@@ -171,15 +171,17 @@ class OnnxBackend(InferenceBackend):
         self._input_name = ort_in.name
         self._output_name = ort_out.name
 
-        self.model_metadata["inputs"]["name"] = self._input_name
-        self.model_metadata["inputs"]["shape"] = self._ort_shape_to_v2(ort_in.shape)
-        self.model_metadata["inputs"]["datatype"] = OnnxBackend._ORT_TYPE_TO_V2[
+        self.model_metadata["inputs"][0]["name"] = self._input_name
+        self.model_metadata["inputs"][0]["shape"] = self._ort_shape_to_v2(ort_in.shape)
+        self.model_metadata["inputs"][0]["datatype"] = OnnxBackend._ORT_TYPE_TO_V2[
             ort_in.type
         ]
 
-        self.model_metadata["outputs"]["name"] = self._output_name
-        self.model_metadata["outputs"]["shape"] = self._ort_shape_to_v2(ort_out.shape)
-        self.model_metadata["outputs"]["datatype"] = OnnxBackend._ORT_TYPE_TO_V2[
+        self.model_metadata["outputs"][0]["name"] = self._output_name
+        self.model_metadata["outputs"][0]["shape"] = self._ort_shape_to_v2(
+            ort_out.shape
+        )
+        self.model_metadata["outputs"][0]["datatype"] = OnnxBackend._ORT_TYPE_TO_V2[
             ort_out.type
         ]
 
@@ -187,15 +189,16 @@ class OnnxBackend(InferenceBackend):
         """Warm Exection Provider by running inference with zeroed tensor input array"""
         # Convert Onnx Dtype to Numpy; Set shape dynamic size to 1
         dtype: npt.DTypeLike = InferenceBackend._V2_DTYPE_TO_NUMPY[
-            self.model_metadata["inputs"]["datatype"]
+            self.model_metadata["inputs"][0]["datatype"]
         ]
-        shape = self.model_metadata["inputs"]["shape"]
-        shape[0] = 1
-        input_array = np.zeros_like(shape, dtype=dtype)
+        shape = self.model_metadata["inputs"][0]["shape"]
+        # set batch size to 250 for max batch size
+        shape[0] = 250
+        input_arrays = np.zeros(shape, dtype=dtype).reshape(shape)
 
         t0 = time.monotonic()
         try:
-            result = await self.infer([input_array])
+            result = await self.infer(input_arrays)
         except Exception as exc:
             LOGGER.error(f"infer failed id=prewarm, dtype={dtype} shape={shape}: {exc}")
             raise

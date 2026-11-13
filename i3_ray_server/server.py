@@ -45,7 +45,7 @@ class EnvConfig:
     LOG_LEVEL: LoggerLevel = "INFO"
 
 
-ENV = from_environment_as_dataclass(EnvConfig)
+ENV = from_environment_as_dataclass(EnvConfig)  # pyright: ignore
 LOGGER = logging.getLogger("ray")
 LOGGER.setLevel(ENV.LOG_LEVEL)
 
@@ -150,12 +150,8 @@ class GenericServe:
         LOGGER.info(f"model path: {self.backend.model_path}")
         LOGGER.info(
             f"ONNX tensors:  "
-            f"  input_name={self.backend.model_metadata['inputs']['name']!r}"
-            f"  input_shape={self.backend.model_metadata['inputs']['shape']} "
-            f"  input_dtype={self.backend.model_metadata['inputs']['datatype']}  |  "
-            f"  output_name={self.backend.model_metadata['outputs']['name']!r}"
-            f"  output_shape={self.backend.model_metadata['outputs']['shape']} "
-            f"  output_dtype={self.backend.model_metadata['outputs']['datatype']}"
+            f"inputs: \n{self.backend.model_metadata['inputs']}\n"
+            f"outputs: \n{self.backend.model_metadata['outputs']}"
         )
         LOGGER.info(
             f"batching:  max_size={self.backend.options_get('batch_max_size')}  "
@@ -217,8 +213,8 @@ class GenericServe:
 
         return {
             "id": "warm",
-            "model_name": self.backend.model_metadata["name"],
-            "model_version": self.backend.model_metadata["version"],
+            "model_name": self.backend.model_name,
+            "model_version": self.backend.model_version,
             "outputs": [
                 {
                     "name": self.backend.model_metadata["outputs"]["name"],
@@ -253,7 +249,6 @@ class GenericServe:
                 status_code=400,
                 detail=f"Expected 1 input tensor, got {len(inputs)}",
             )
-
         tensor = inputs[0]
         input_shape = tensor.get("shape", [])
         LOGGER.debug(f"infer request  id={request_id[:8]!r} shape={input_shape}")
@@ -284,8 +279,8 @@ class GenericServe:
             "model_version": self.backend.model_version,
             "outputs": [
                 {
-                    "name": self.backend.model_metadata["outputs"]["name"],
-                    "datatype": self.backend.model_metadata["outputs"]["name"],
+                    "name": self.backend.model_metadata["outputs"][0]["name"],
+                    "datatype": self.backend.model_metadata["outputs"][0]["name"],
                     "shape": list(result.shape),
                     "data": result.flatten().tolist(),
                 }
@@ -312,7 +307,7 @@ class GenericServe:
 
         return results
 
-    def reconfigure(self, user_config: dict):
+    async def reconfigure(self, user_config: dict):
         """Set the max_batch_size and batch_wait_timeout_s via user_config if available"""
         max_batch_size = user_config.get("max_batch_size", 1)
         batch_wait_timeout_s = user_config.get("batch_wait_timeout_s", 0.001)
