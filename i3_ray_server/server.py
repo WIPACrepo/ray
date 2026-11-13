@@ -312,12 +312,11 @@ class GenericServe:
         max_batch_size = user_config.get("max_batch_size", 1)
         batch_wait_timeout_s = user_config.get("batch_wait_timeout_s", 0.001)
 
-        self._batch_inference.set_max_batch_size(max_batch_size)  # pyright: ignore[reportAttributeAccessIssue]
-        self._batch_inference.set_batch_wait_timeout_s(batch_wait_timeout_s)  # pyright: ignore[reportAttributeAccessIssue]
+        self._batch_inference.set_max_batch_size(max_batch_size)  # type: ignore[attr-defined,reportAttributeAccessIssue]
+        self._batch_inference.set_batch_wait_timeout_s(batch_wait_timeout_s)  # type: ignore[attr-defined,reportAttributeAccessIssue]
 
 
-# model = GenericServe.bind(args)  # type: ignore[attr-defined]
 def build(args: dict):
     # Validate at deploy time so bad config fails here, not in the replica
     # BackendConfig(**args)
-    return GenericServe.bind(args)
+    return GenericServe.bind(args)  # type: ignore[attr-defined,reportAttributeAccessIssue]

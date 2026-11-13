@@ -8,7 +8,6 @@ from typing import Any, ClassVar
 
 import numpy as np
 import numpy.typing as npt
-# from pydantic import BaseModel
 
 LOGGER = logging.getLogger("ray")
 
@@ -136,7 +135,7 @@ class OnnxBackend(InferenceBackend):
     }
 
     def load(self):
-        import onnxruntime as ort
+        import onnxruntime as ort  # type: ignore
 
         ort.preload_dlls(directory="")
 
