@@ -175,9 +175,6 @@ class GenericServe:
 
         self.config, self.backend = config, backend
 
-    # -----------------------------------------------------------------------
-    # Health endpoints
-    # -----------------------------------------------------------------------
     @api.get("/ready")
     async def model_ready(
         self,
@@ -188,10 +185,6 @@ class GenericServe:
             f"model_ready  model={self.backend.model_name!r} version={self.backend.model_version}"
         )
         return {"ready": True}
-
-    # -----------------------------------------------------------------------
-    # Metadata endpoints
-    # -----------------------------------------------------------------------
 
     @api.get("/")
     async def model_metadata(
@@ -206,16 +199,12 @@ class GenericServe:
         )
         return self.backend.model_metadata
 
-    # -----------------------------------------------------------------------
-    # Inference endpoints
-    # -----------------------------------------------------------------------
-
     @api.get("/warm")
     async def warm(
         self,
         _claims: Annotated[dict, Depends(Auth.require_auth)],
     ):
-        """Warm Exection Provider by running inference with zeroed tensor input array"""
+        """Warm Exection Provider by running inference with zeroed tensor input array."""
         try:
             result = await self.backend.warm()
         except Exception as exc:
@@ -329,7 +318,7 @@ class GenericServe:
 class Gateway:
     """Gateway app to handle KServe V2 API endpoints for serve liveness and readiness
 
-    Also provides endpoints for latest model verssion readiness and infer for other Ray Serve deployments
+    Also provides endpoints for latest model verssion readiness and infer for other Ray Serve deployments.
     """
 
     def __init__(self, models: list[dict]):
