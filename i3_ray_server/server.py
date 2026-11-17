@@ -22,6 +22,7 @@ import time
 from typing import Annotated, Any
 
 import numpy as np
+import numpy.typing as npt
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
@@ -135,6 +136,7 @@ class GenericServe:
 
     def __init__(self, config: dict):
         self._build(BackendConfig(**config))
+        self.max_batch_size = 1
 
         LOGGER.info(
             f"Serve deployment ready  "
@@ -206,7 +208,7 @@ class GenericServe:
     ):
         """Warm Exection Provider by running inference with zeroed tensor input array"""
         try:
-            result = await self.backend.warm()
+            result = await self.backend.warm(self.max_batch_size)
         except Exception as exc:
             LOGGER.error(f"warm failed {exc}")
             raise
@@ -253,7 +255,7 @@ class GenericServe:
         input_shape = tensor.get("shape", [])
         LOGGER.debug(f"infer request  id={request_id[:8]!r} shape={input_shape}")
 
-        dtype = InferenceBackend._V2_DTYPE_TO_NUMPY.get(
+        dtype = InferenceBackend.V2_DTYPE_TO_NUMPY.get(
             tensor.get("datatype", "FP16"), np.float16
         )
         input_array = np.array(tensor["data"], dtype=dtype).reshape(tensor["shape"])
@@ -291,8 +293,8 @@ class GenericServe:
         batch_size_fn=lambda arrays: sum(len(a) for a in arrays),
     )
     async def _batch_inference(
-        self, input_arrays: list[np.ndarray]
-    ) -> list[np.ndarray]:
+        self, input_arrays: list[npt.NDarray[Any]]
+    ) -> list[npt.NDarray[Any]]:
         """Ray Serve collects individual infer() calls into a batch here
         reconfigure is ran to set appropriate batch size and timeouts on infer from user_config in ServeConfig
         """
@@ -311,6 +313,8 @@ class GenericServe:
         """Set the max_batch_size and batch_wait_timeout_s via user_config if available"""
         max_batch_size = user_config.get("max_batch_size", 1)
         batch_wait_timeout_s = user_config.get("batch_wait_timeout_s", 0.001)
+
+        self.max_batch_size = max_batch_size
 
         self._batch_inference.set_max_batch_size(max_batch_size)  # type: ignore[attr-defined,reportAttributeAccessIssue]
         self._batch_inference.set_batch_wait_timeout_s(batch_wait_timeout_s)  # type: ignore[attr-defined,reportAttributeAccessIssue]

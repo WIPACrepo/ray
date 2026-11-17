@@ -1,4 +1,4 @@
-from . import inference_backend, server
+import inference_backend, server
 
 __all__ = ["inference_backend", "server"]
 # NOTE: `__version__` is not defined because this package is built using 'setuptools-scm' --

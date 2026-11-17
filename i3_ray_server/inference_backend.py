@@ -40,8 +40,8 @@ class BackendConfig:
 
 
 class InferenceBackend(ABC):
-    # Map from Kserve V2 datatype strings to numpy dtypes — mirrors the client's _V2_DTYPE_TO_NUMPY.
-    _V2_DTYPE_TO_NUMPY: ClassVar[dict[str, Any]] = {
+    # Map from Kserve V2 datatype strings to numpy dtypes — mirrors the client's V2_DTYPE_TO_NUMPY.
+    V2_DTYPE_TO_NUMPY: ClassVar[dict[str, Any]] = {
         "FP16": np.float16,
         "FP32": np.float32,
         "FP64": np.float64,
@@ -87,7 +87,7 @@ class InferenceBackend(ABC):
     async def infer(self, inputs: list[npt.NDArray[Any]]) -> list[npt.NDArray[Any]]: ...
 
     @abstractmethod
-    async def warm(self) -> Any: ...
+    async def warm(self, batch_size: int) -> Any: ...
 
     def close(self) -> None: ...
 
@@ -184,16 +184,19 @@ class OnnxBackend(InferenceBackend):
             ort_out.type
         ]
 
-    async def warm(self) -> list[npt.NDArray[Any]]:
+    async def warm(self, batch_size: int) -> list[npt.NDArray[Any]]:
         """Warm Exection Provider by running inference with zeroed tensor input array"""
         # Convert Onnx Dtype to Numpy; Set shape dynamic size to 1
-        dtype: npt.DTypeLike = InferenceBackend._V2_DTYPE_TO_NUMPY[
+        dtype = InferenceBackend.V2_DTYPE_TO_NUMPY[
             self.model_metadata["inputs"][0]["datatype"]
         ]
-        shape = self.model_metadata["inputs"][0]["shape"]
+        shape = np.array(self.model_metadata["inputs"][0]["shape"])
         # set batch size to 250 for max batch size
-        shape[0] = 250
-        input_arrays = np.zeros(shape, dtype=dtype).reshape(shape)
+        shape[0] = 1
+
+        input_arrays = []
+        for n in range(batch_size):
+            input_arrays[n] = np.zeros(shape, dtype=dtype).reshape(shape)
 
         t0 = time.monotonic()
         try:

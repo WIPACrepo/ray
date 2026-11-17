@@ -61,4 +61,4 @@ fallback_version = "CANNOT_BUILD_WITHOUT_GIT_DIR" # used when SCM metadata is mi
 exclude = ["ray-translate/"]
 
 [tool.ty.environment]
-root = ["./i3_ray_server"]
+root = ["."]
