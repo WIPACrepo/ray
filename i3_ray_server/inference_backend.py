@@ -284,5 +284,6 @@ class OnnxBackend(InferenceBackend):
 
             idx = providers.index("TensorrtExecutionProvider")
             providers[idx] = ("TensorrtExecutionProvider", trt_provider_options)
+        # TODO: Add CUDAExecutionProvider provider options
 
         return providers
