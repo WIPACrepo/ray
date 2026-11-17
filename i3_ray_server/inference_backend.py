@@ -36,6 +36,8 @@ class BackendConfig:
     model_name: str
     model_version: str
     model_path: str | None = None
+    batch_max_size: int = 1
+    batch_wait_time_out_s: float = 0.01
     options: dict[str, Any] = dc.field(default_factory=dict)
 
 
@@ -63,6 +65,8 @@ class InferenceBackend(ABC):
         self.model_name = config.model_name
         self.model_version = config.model_version
         self.model_path = self._get_model_path()
+        self.batch_max_size = config.batch_max_size
+        self.batch_wait_time_out_s = config.batch_wait_time_out_s
         self.model_metadata: dict[str, Any] = {
             "name": self._config.model_name,
             "versions": [self._config.model_version],
@@ -86,10 +90,10 @@ class InferenceBackend(ABC):
     def load(self) -> None: ...
 
     @abstractmethod
-    async def infer(self, inputs: list[npt.NDArray[Any]]) -> list[npt.NDArray[Any]]: ...
+    async def infer(self, inputs: npt.NDArray[Any]) -> npt.NDArray[Any]: ...
 
     @abstractmethod
-    async def warm(self, batch_size: int) -> Any: ...
+    async def warm(self) -> Any: ...
 
     def close(self) -> None: ...
 
@@ -187,7 +191,7 @@ class OnnxBackend(InferenceBackend):
             ort_out.type
         ]
 
-    async def warm(self, batch_size: int) -> list[npt.NDArray[Any]]:
+    async def warm(self) -> npt.NDArray[Any]:
         """Warm model by running inference with zeroed tensor input array"""
         # Convert Onnx Dtype to Numpy; Set shape dynamic size to 1
         dtype = InferenceBackend.V2_DTYPE_TO_NUMPY[
@@ -198,12 +202,14 @@ class OnnxBackend(InferenceBackend):
         shape[0] = 1
 
         input_arrays = []
-        for n in range(batch_size):
-            input_arrays[n] = np.zeros(shape, dtype=dtype).reshape(shape)
+        for n in range(self.batch_max_size):
+            input_arrays.append(np.zeros(shape, dtype=dtype))
+
+        inputs = np.concatenate(input_arrays, axis=0)
 
         t0 = time.monotonic()
         try:
-            result = await self.infer(input_arrays)
+            result = await self.infer(inputs)
         except Exception as exc:
             LOGGER.error(f"infer failed id=prewarm, dtype={dtype} shape={shape}: {exc}")
             raise
@@ -216,7 +222,7 @@ class OnnxBackend(InferenceBackend):
 
         return result
 
-    async def infer(self, inputs: list[npt.NDArray[Any]]) -> list[npt.NDArray[Any]]:
+    async def infer(self, inputs: npt.NDArray[Any]) -> npt.NDArray[Any]:
         """Run batched ONNX inference.
 
         Ray Serve collects individual infer() calls into a batch here
@@ -239,12 +245,7 @@ class OnnxBackend(InferenceBackend):
             f"{(time.monotonic() - t0) * 1000:.1f}ms"
         )
 
-        # Split the batched output back into per-request arrays.
-        # np.split with an empty index list (single request case) correctly
-        # returns [batched_result] unchanged.
-        sizes = [arr.shape[0] for arr in inputs]
-        split_indices: list[int] = np.cumsum(sizes)[:-1].tolist()
-        return list(np.split(result, split_indices))
+        return result
 
     def _ort_shape_to_v2(self, shape: list) -> list[int]:
         """Convert an ORT shape (with str entries for dynamic dims) to a V2 shape (-1 for dynamic)."""

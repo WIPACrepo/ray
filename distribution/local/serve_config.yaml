@@ -7,6 +7,19 @@ logging_config:
   logs_dir: null
   enable_access_log: true
 applications:
+  - name: Gateway
+    route_prefix: /v2
+    import_path: server:build_gateway
+    args:
+      models:
+        - application: OnnxInferenceBackend
+          name: tglauch_classifier
+          version: "3"
+    runtime_env:
+      # Only relevant for running locally; if running via container platform, set env variables through platform specs
+      env_vars:
+        CI: "True"
+        LOG_LEVEL: INFO
   - name: OnnxInferenceBackend
     route_prefix: /v2/models/tglauch_classifier
     import_path: server:build
@@ -17,6 +30,9 @@ applications:
       model_name: tglauch_classifier
       model_version: "3"
       model_repo: /cvmfs/icecube.opensciencegrid.org/users/briedel/ml/models
+      model_path: /home/asheperd/work/models/model.onnx
+      batch_max_size: 250
+      batch_wait_time_out_s: 0.01
       # Options are InferenceBackend specific configuration
       options:
         providers: [CUDAExecutionProvider, CPUExectionProvider]
@@ -30,9 +46,6 @@ applications:
       # Should be confgiuration passed to deployment handle @serve.deployment
       #   https://docs.ray.io/en/master/serve/configure-serve-deployment.html
       - name: GenericServe
-        user_config:
-          batch_max_size: 1
-          batch_wait_timeout_s: 0.01
         max_ongoing_requests: 2
         max_queued_requests: 10
         backpressure_config:

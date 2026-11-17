@@ -22,8 +22,9 @@ from typing import Annotated, Any
 
 import numpy as np
 import numpy.typing as npt
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from packaging.version import Version
 from ray import serve  # type: ignore[unresolved-import,import-untyped]
 from rest_tools.utils import OpenIDAuth
 from wipac_dev_tools import from_environment_as_dataclass
@@ -115,10 +116,10 @@ class Auth:
 
 
 # ---------------------------------------------------------------------------
-# FastAPI app (shared across all replicas via Ray Serve ingress)
+# FastAPI api (shared across all replicas via Ray Serve ingress)
 # ---------------------------------------------------------------------------
 
-app = FastAPI()
+api = FastAPI()
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +128,7 @@ app = FastAPI()
 
 
 @serve.deployment()
-@serve.ingress(app)
+@serve.ingress(api)
 class GenericServe:
     """Ray Serve deployment serving an InferenceBackend
 
@@ -135,8 +136,16 @@ class GenericServe:
     """
 
     def __init__(self, config: dict):
-        self._build(BackendConfig(**config))
-        self.max_batch_size = 1
+        self.config = BackendConfig(**config)
+        self.backend = create_backend(self.config)
+        self.backend.load()
+
+        self._batch_inference.set_max_batch_size(  # type: ignore[attr-defined,reportAttributeAccessIssue]
+            self.backend.batch_max_size
+        )
+        self._batch_inference.set_batch_wait_timeout_s(  # type: ignore[attr-defined,reportAttributeAccessIssue]
+            self.backend.batch_wait_time_out_s
+        )
 
         LOGGER.info(
             f"Serve deployment ready  "
@@ -169,7 +178,7 @@ class GenericServe:
     # -----------------------------------------------------------------------
     # Health endpoints
     # -----------------------------------------------------------------------
-    @app.get("/ready")
+    @api.get("/ready")
     async def model_ready(
         self,
         _claims: Annotated[dict, Depends(Auth.require_auth)],
@@ -178,13 +187,13 @@ class GenericServe:
         LOGGER.debug(
             f"model_ready  model={self.backend.model_name!r} version={self.backend.model_version}"
         )
-        return {}
+        return {"ready": True}
 
     # -----------------------------------------------------------------------
     # Metadata endpoints
     # -----------------------------------------------------------------------
 
-    @app.get("/")
+    @api.get("/")
     async def model_metadata(
         self,
         _claims: Annotated[dict, Depends(Auth.require_auth)],
@@ -201,14 +210,14 @@ class GenericServe:
     # Inference endpoints
     # -----------------------------------------------------------------------
 
-    @app.get("/warm")
+    @api.get("/warm")
     async def warm(
         self,
         _claims: Annotated[dict, Depends(Auth.require_auth)],
     ):
         """Warm Exection Provider by running inference with zeroed tensor input array"""
         try:
-            result = await self.backend.warm(self.max_batch_size)
+            result = await self.backend.warm()
         except Exception as exc:
             LOGGER.error(f"warm failed {exc}")
             raise
@@ -219,15 +228,15 @@ class GenericServe:
             "model_version": self.backend.model_version,
             "outputs": [
                 {
-                    "name": self.backend.model_metadata["outputs"]["name"],
-                    "datatype": self.backend.model_metadata["outputs"]["datatype"],
-                    "shape": self.backend.model_metadata["outputs"]["shape"],
+                    "name": self.backend.model_metadata["outputs"][0]["name"],
+                    "datatype": self.backend.model_metadata["outputs"][0]["datatype"],
+                    "shape": self.backend.model_metadata["outputs"][0]["shape"],
                     "data": result.flatten().tolist(),
                 }
             ],
         }
 
-    @app.post("/infer")
+    @api.post("/infer")
     async def infer(
         self,
         http_request: Request,
@@ -293,8 +302,8 @@ class GenericServe:
         batch_size_fn=lambda arrays: sum(len(a) for a in arrays),
     )
     async def _batch_inference(
-        self, input_arrays: list[npt.NDarray[Any]]
-    ) -> list[npt.NDarray[Any]]:
+        self, input_arrays: list[npt.NDArray[Any]]
+    ) -> list[npt.NDArray[Any]]:
         """Ray Serve collects individual infer() calls into a batch here
         reconfigure is ran to set appropriate batch size and timeouts on infer from user_config in ServeConfig
         """
@@ -305,19 +314,78 @@ class GenericServe:
             f"_run_inference: batching {len(input_arrays)} request(s) → shape {batched.shape}"
         )
 
-        results = await self.backend.infer(batched)
+        output = await self.backend.infer(batched)
 
-        return results
+        # Split the batched output back into per-request arrays.
+        # np.split with an empty index list (single request case) correctly
+        # returns [batched_result] unchanged.
+        sizes = [arr.shape[0] for arr in input_arrays]
+        split_indices: list[int] = np.cumsum(sizes)[:-1].tolist()
+        return list(np.split(output, split_indices))
 
-    async def reconfigure(self, user_config: dict):
-        """Set the max_batch_size and batch_wait_timeout_s via user_config if available"""
-        max_batch_size = user_config.get("max_batch_size", 1)
-        batch_wait_timeout_s = user_config.get("batch_wait_timeout_s", 0.001)
 
-        self.max_batch_size = max_batch_size
+@serve.deployment(num_replicas=1)
+@serve.ingress(api)
+class Gateway:
+    """Gateway app to handle KServe V2 API endpoints for serve liveness and readiness
 
-        self._batch_inference.set_max_batch_size(max_batch_size)  # type: ignore[attr-defined,reportAttributeAccessIssue]
-        self._batch_inference.set_batch_wait_timeout_s(batch_wait_timeout_s)  # type: ignore[attr-defined,reportAttributeAccessIssue]
+    Also provides endpoints for latest model verssion readiness and infer for other Ray Serve deployments
+    """
+
+    def __init__(self, models: list[dict]):
+        # list of models from ServeConfigV2 args "models" dict
+        self.models = models
+        # Ray Serve deployment handles
+        self._handles = {}
+
+    def _handle(self, app: str):
+        if app not in self._handles:
+            self._handles[app] = serve.get_app_handle(app)
+        return self._handles[app]
+
+    def _latest(self, name: str) -> dict:
+        versions = [m for m in self.models if m["name"] == name]
+        if not versions:
+            raise HTTPException(404, f"unknown model {name!r}")
+        return max(versions, key=lambda m: Version(m["version"]))
+
+    async def _is_ready(self, app: str, *args) -> dict:
+        try:
+            return await asyncio.wait_for(
+                self._handle(app).options(method_name="model_ready").remote(*args),
+                timeout=2,
+            )
+        except TimeoutError:
+            return {"ready": False}
+
+    @api.get("/")
+    async def server_metadata(self):
+        """Return server metadata"""
+        return {"name": "ray-serve-inference", "version": "1.0", "extensions": []}
+
+    @api.get("/health/live")
+    async def live(self):
+        """Return is server is up"""
+        return {"ready": True}
+
+    @api.get("/models/{name}/ready")
+    async def model_ready(
+        self,
+        name: str,
+        response: Response,
+        _claims: Annotated[dict, Depends(Auth.require_auth)],
+    ) -> dict:
+        """Return if certain model is ready, on latest version"""
+        m = self._latest(name)
+        json = {"ready": True}
+        if not await self._is_ready(m["application"], _claims):
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            json["ready"] = False
+        return json
+
+
+def build_gateway(args: dict):
+    return Gateway.bind(args["models"])
 
 
 def build(args: dict):
