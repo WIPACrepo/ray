@@ -13,11 +13,10 @@ Triton config.pbtxt equivalents:
     - version_policy:    version 3 hardcoded as self.model_version below
 """
 
-import asyncio
+import asyncio  # noqa F401
 import dataclasses as dc
 import importlib.metadata
 import logging
-import os
 import time
 from typing import Annotated, Any
 
@@ -25,9 +24,7 @@ import numpy as np
 import numpy.typing as npt
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
 from ray import serve  # type: ignore[unresolved-import,import-untyped]
-from ray.serve.config import BackpressureConfig  # type: ignore[unresolved-import,import-untyped]
 from rest_tools.utils import OpenIDAuth
 from wipac_dev_tools import from_environment_as_dataclass
 from wipac_dev_tools.logging_tools import LoggerLevel
