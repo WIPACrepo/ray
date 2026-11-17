@@ -3,6 +3,7 @@
 from typing import Annotated
 
 from fastapi import Depends, FastAPI
+
 from i3_ray_server.server import Auth
 
 app = FastAPI(title="Auth Test Harness")
