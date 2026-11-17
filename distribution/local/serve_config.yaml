@@ -1,0 +1,57 @@
+http_options:
+  host: 127.0.0.1
+  port: 8000
+logging_config:
+  encoding: TEXT
+  log_level: INFO
+  logs_dir: null
+  enable_access_log: true
+applications:
+  - name: Gateway
+    route_prefix: /v2
+    import_path: server:build_gateway
+    args:
+      models:
+        - application: OnnxInferenceBackend
+          name: tglauch_classifier
+          version: "3"
+    runtime_env:
+      # Only relevant for running locally; if running via container platform, set env variables through platform specs
+      env_vars:
+        CI: "True"
+        LOG_LEVEL: INFO
+  - name: OnnxInferenceBackend
+    route_prefix: /v2/models/tglauch_classifier
+    import_path: server:build
+    args:
+      # runtime should match V2 Platform specs, and have an appropriate InferenceBackend:
+      #   https://kserve.github.io/website/docs/concepts/architecture/data-plane/v2-protocol#platforms
+      runtime: onnx_onnxv1
+      model_name: tglauch_classifier
+      model_version: "3"
+      model_repo: /cvmfs/icecube.opensciencegrid.org/users/briedel/ml/models
+      model_path: /home/asheperd/work/models/model.onnx
+      batch_max_size: 250
+      batch_wait_time_out_s: 0.01
+      # Options are InferenceBackend specific configuration
+      options:
+        providers: [CUDAExecutionProvider, CPUExectionProvider]
+    runtime_env:
+      # Only relevant for running locally; if running via container platform, set env variables through platform specs
+      env_vars:
+        CI: "True"
+        LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}:${VIRTUAL_ENV}/lib
+        LOG_LEVEL: INFO
+    deployments:
+      # Should be confgiuration passed to deployment handle @serve.deployment
+      #   https://docs.ray.io/en/master/serve/configure-serve-deployment.html
+      - name: GenericServe
+        max_ongoing_requests: 2
+        max_queued_requests: 10
+        backpressure_config:
+          status_code: 429
+          retry_after_s: 10
+        autoscaling_config:
+          target_ongoing_requests: 1
+          min_replicas: 1
+          max_replicas: 1
