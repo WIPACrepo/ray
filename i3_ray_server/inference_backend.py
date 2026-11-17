@@ -40,6 +40,8 @@ class BackendConfig:
 
 
 class InferenceBackend(ABC):
+    """Abstract Base Class for InferenceBackend"""
+
     # Map from Kserve V2 datatype strings to numpy dtypes — mirrors the client's V2_DTYPE_TO_NUMPY.
     V2_DTYPE_TO_NUMPY: ClassVar[dict[str, Any]] = {
         "FP16": np.float16,
@@ -96,7 +98,7 @@ _REGISTRY: dict[str, type[InferenceBackend]] = {}
 
 
 def register_backend(name: str):
-    """Class decorator for registering as an extension of InferenceBackend"""
+    """Class decorator for registering a InferenceBackend"""
 
     def deco(cls):
         _REGISTRY[name] = cls
@@ -106,6 +108,7 @@ def register_backend(name: str):
 
 
 def create_backend(config: BackendConfig) -> InferenceBackend:
+    """Used by Ray Serve application the initialize a backend"""
     try:
         return _REGISTRY[config.runtime](config)
     except KeyError:
@@ -185,7 +188,7 @@ class OnnxBackend(InferenceBackend):
         ]
 
     async def warm(self, batch_size: int) -> list[npt.NDArray[Any]]:
-        """Warm Exection Provider by running inference with zeroed tensor input array"""
+        """Warm model by running inference with zeroed tensor input array"""
         # Convert Onnx Dtype to Numpy; Set shape dynamic size to 1
         dtype = InferenceBackend.V2_DTYPE_TO_NUMPY[
             self.model_metadata["inputs"][0]["datatype"]
@@ -216,8 +219,7 @@ class OnnxBackend(InferenceBackend):
     async def infer(self, inputs: list[npt.NDArray[Any]]) -> list[npt.NDArray[Any]]:
         """Run batched ONNX inference.
 
-        Ray Serve collects individual infer() calls into a batch here,
-        replacing Triton's dynamic_batching behavior.
+        Ray Serve collects individual infer() calls into a batch here
         """
         # session.run is synchronous and GPU-bound; offload it to a thread
         # executor so the Ray Serve event loop is not blocked during inference.
@@ -250,7 +252,10 @@ class OnnxBackend(InferenceBackend):
         return [-1 if isinstance(s, str) else int(s) for s in shape]
 
     def _configure_providers(self) -> list[str | tuple]:
-        """Helper method for creating providers array for InferenceSession. Outputs list"""
+        """Helper method for creating providers array for InferenceSession.
+
+        Outputs list to supply to providers in Ort InferenceSession
+        """
         providers: list = self._config.options["providers"] or [
             "CUDAExecutionProvider",
             "CPUExecutionProvider",

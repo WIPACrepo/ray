@@ -129,7 +129,10 @@ app = FastAPI()
 @serve.deployment()
 @serve.ingress(app)
 class GenericServe:
-    """Ray Serve deployment serving an InferenceBackend"""
+    """Ray Serve deployment serving an InferenceBackend
+
+    This should be configured via a ServeConfigV2: https://docs.ray.io/en/latest/serve/production-guide/config.html
+    """
 
     def __init__(self, config: dict):
         self._build(BackendConfig(**config))
@@ -318,6 +321,4 @@ class GenericServe:
 
 
 def build(args: dict):
-    # Validate at deploy time so bad config fails here, not in the replica
-    # BackendConfig(**args)
-    return GenericServe.bind(args)  # type: ignore[attr-defined,reportAttributeAccessIssue]
+    return GenericServe.bind(args)
